@@ -553,10 +553,13 @@ impl Db {
             // Group by an arbitrary set of key columns; keys come back as strings.
             let group = |keys: &[&str]| -> rusqlite::Result<Vec<Value>> {
                 let sel = keys.join(", ");
+                // Group by position: the select list may carry aliases (`... AS bucket`),
+                // which are not valid inside GROUP BY.
+                let by = (1..=keys.len()).map(|i| i.to_string()).collect::<Vec<_>>().join(", ");
                 let mut st = c.prepare(&format!(
                     "SELECT {sel}, COUNT(*), COALESCE(SUM(promptTokens),0), COALESCE(SUM(completionTokens),0), {cached},
                             COALESCE(SUM(cost),0), MAX(timestamp)
-                     FROM usageHistory WHERE timestamp >= ?1 GROUP BY {sel} ORDER BY COUNT(*) DESC LIMIT 400"
+                     FROM usageHistory WHERE timestamp >= ?1 GROUP BY {by} ORDER BY COUNT(*) DESC LIMIT 400"
                 ))?;
                 let n = keys.len();
                 let rows = st.query_map(params![since], |r| {

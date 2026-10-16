@@ -1,0 +1,46 @@
+[package]
+name = "mini-router"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+description = "Lightweight AI API router (OpenAI / Anthropic / Gemini translation, multi-account fallback, usage tracking) for SBCs"
+license = "MIT"
+build = "build.rs"
+
+[[bin]]
+name = "mini-router"
+path = "src/main.rs"
+
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal", "fs"] }
+axum = { version = "0.7", features = ["json", "macros"] }
+tower-http = { version = "0.5", features = ["cors"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "gzip", "http2"] }
+futures-util = "0.3"
+tokio-stream = "0.1"
+bytes = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+toml = "0.8"
+rusqlite = { version = "0.32", features = ["bundled"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+sha2 = "0.10"
+hmac = "0.12"
+rand = "0.8"
+uuid = { version = "1", features = ["v4"] }
+time = { version = "0.3", features = ["formatting", "parsing"] }
+anyhow = "1"
+parking_lot = "0.12"
+clap = { version = "4", features = ["derive", "env"] }
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.dev]
+opt-level = 1

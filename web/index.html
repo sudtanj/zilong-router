@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mini-router</title>
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32'%3E%3Crect width='32' height='32' rx='6' fill='%23E56A4A'/%3E%3Ctext x='16' y='23' font-family='system-ui' font-size='18' font-weight='700' fill='white' text-anchor='middle'%3Em%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0..1,0&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<script>
+// Theme before first paint (same localStorage key semantics as upstream: light | dark | system).
+(function(){try{var t=localStorage.getItem('mr-theme')||'system';var m=window.matchMedia('(prefers-color-scheme: dark)').matches;if(t==='dark'||(t==='system'&&m))document.documentElement.classList.add('dark')}catch(e){}})();
+// Reveal icons once the symbol font is in, or after 3s so a blocked CDN never hides the UI.
+(function(){var r=document.documentElement,f=function(){r.classList.add('fonts-loaded')};if(document.fonts&&document.fonts.load){document.fonts.load('24px "Material Symbols Outlined"').then(f).catch(f);setTimeout(f,3000)}else{f()}})();
+</script>
+</head>
+<body>
+<div id="login" class="login hidden">
+  <div class="landing-grid"></div>
+  <div class="box">
+    <h1>mini-router</h1>
+    <p class="lead">Enter your password to access the dashboard</p>
+    <div class="card">
+      <form id="login-form" class="col gap4">
+        <div class="field">
+          <label>Password</label>
+          <input id="login-password" class="input" type="password" placeholder="Enter password" autocomplete="current-password" required autofocus>
+          <p id="login-error" class="xs danger"></p>
+        </div>
+        <button class="btn primary full" type="submit" id="login-btn">Login</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div id="app" class="app hidden">
+  <div class="scrim" id="scrim"></div>
+  <aside class="sidebar">
+    <div class="traffic"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+    <a class="logo" href="#/endpoint">
+      <div class="tile"><span class="ms i20">hub</span></div>
+      <div class="col"><h1>mini-router</h1><span class="ver" id="version"></span></div>
+    </a>
+    <nav class="nav" id="nav">
+      <a href="#/endpoint" data-page="endpoint"><span class="ms i18">api</span><span class="lbl">Endpoint &amp; Key</span></a>
+      <a href="#/providers" data-page="providers"><span class="ms i18">dns</span><span class="lbl">Providers</span></a>
+      <a href="#/usage" data-page="usage"><span class="ms i18">bar_chart</span><span class="lbl">Usage</span></a>
+      <div class="section"><p>System</p></div>
+      <a href="#/profile" data-page="profile"><span class="ms i18">settings</span><span class="lbl">Settings</span></a>
+      <a href="https://github.com/decolua/9router" target="_blank" rel="noreferrer"><span class="ms i18">open_in_new</span><span class="lbl">9Router upstream</span></a>
+    </nav>
+  </aside>
+
+  <main class="main">
+    <div class="landing-grid"></div>
+    <header class="header">
+      <button class="menubtn iconbtn sq" id="menubtn" aria-label="Menu"><span class="ms">menu</span></button>
+      <div class="title" id="page-title"></div>
+      <div class="actions">
+        <div class="search hidden" id="search"><span class="ms i16">search</span><input id="search-input" type="text" placeholder="Search..."></div>
+        <button class="iconbtn" id="theme-toggle" title="Toggle theme"><span class="ms i22">dark_mode</span></button>
+        <div style="position:relative">
+          <button class="iconbtn sq" id="menu-toggle" title="Menu"><span class="ms">grid_view</span></button>
+          <div class="dropdown hidden" id="menu">
+            <button data-act="toggleTheme"><span class="ms i20">dark_mode</span><span>Theme</span></button>
+            <button data-act="logout" class="danger"><span class="ms i20">logout</span><span>Logout</span></button>
+          </div>
+        </div>
+      </div>
+    </header>
+    <div class="content"><div class="inner" id="main"></div></div>
+  </main>
+</div>
+
+<div class="toasts" id="toasts"></div>
+<div id="modal-root"></div>
+
+<script src="/assets/app.js"></script>
+</body>
+</html>

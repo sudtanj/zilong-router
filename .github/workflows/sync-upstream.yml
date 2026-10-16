@@ -1,0 +1,68 @@
+name: Sync upstream 9router providers
+
+on:
+  schedule:
+    - cron: "17 4 * * 1"   # every Monday 04:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch upstream (shallow, not kept in this repo)
+        id: up
+        run: |
+          git clone --depth 1 https://github.com/decolua/9router .upstream/9router
+          echo "version=$(node -p "require('./.upstream/9router/package.json').version")" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git -C .upstream/9router rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Regenerate data/providers.json, pricing.json, skipped.json
+        run: node tools/sync-upstream/convert.mjs .upstream/9router data
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Validate generated data loads and tests pass
+        run: cargo test --release --locked -q
+
+      - name: Summarise skipped providers for the PR body
+        id: skipped
+        run: |
+          {
+            echo 'list<<EOF'
+            node -e "const s=require('./data/skipped.json').skipped; console.log(s.map(x=>'- '+x.id+' — '+x.reason).join('\n'))"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open pull request if anything changed
+        uses: peter-evans/create-pull-request@v6
+        with:
+          add-paths: data/
+          commit-message: |
+            chore: sync providers from 9router ${{ steps.up.outputs.version }} (${{ steps.up.outputs.sha }})
+
+            Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+          title: "Sync providers from 9router ${{ steps.up.outputs.version }}"
+          body: |
+            Automated weekly sync of the upstream provider registry and pricing tables.
+
+            - upstream: decolua/9router @ `${{ steps.up.outputs.sha }}` (v${{ steps.up.outputs.version }})
+            - regenerated: `data/providers.json`, `data/pricing.json`, `data/skipped.json`
+
+            Providers left out because they need code, not just config:
+            ${{ steps.skipped.outputs.list }}
+
+            🤖 Generated with [Claude Code](https://claude.com/claude-code)
+          branch: sync/upstream-providers
+          delete-branch: true
+          labels: upstream-sync

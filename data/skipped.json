@@ -1,0 +1,399 @@
+{
+ "meta": {
+  "upstreamVersion": "0.5.104",
+  "upstreamCommit": "87a74e1bda3677193c6f71a7e2100c90311f0689",
+  "generatedAt": "2026-10-16"
+ },
+ "skipped": [
+  {
+   "id": "antigravity",
+   "name": "Antigravity",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "aws-polly",
+   "name": "AWS Polly",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "azure",
+   "name": "Azure OpenAI",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "bedrock",
+   "name": "AWS Bedrock",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "bedrock-xai",
+   "name": "AWS Bedrock (xAI)",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "black-forest-labs",
+   "name": "Black Forest Labs",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "brave-search",
+   "name": "Brave Search",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "cartesia",
+   "name": "Cartesia",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "claude",
+   "name": "Claude Code",
+   "reason": "OAuth-only login flow"
+  },
+  {
+   "id": "cline",
+   "name": "Cline",
+   "reason": "OAuth-only login flow"
+  },
+  {
+   "id": "codebuddy-cn",
+   "name": "CodeBuddy CN",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "codebuddy-intl",
+   "name": "CodeBuddy",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "codex",
+   "name": "OpenAI Codex",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "comfyui",
+   "name": "ComfyUI",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "commandcode",
+   "name": "Command Code",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "coqui",
+   "name": "Coqui TTS",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "cursor",
+   "name": "Cursor IDE",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "edge-tts",
+   "name": "Edge TTS",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "elevenlabs",
+   "name": "ElevenLabs",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "exa",
+   "name": "Exa",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "fal-ai",
+   "name": "Fal.ai",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "firecrawl",
+   "name": "Firecrawl",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "fish-audio",
+   "name": "Fish Audio",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "gemini",
+   "name": "Gemini",
+   "reason": "wire format \"gemini\" not implemented"
+  },
+  {
+   "id": "gemini-cli",
+   "name": "Gemini CLI",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "github",
+   "name": "GitHub Copilot",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "gitlab",
+   "name": "GitLab Duo",
+   "reason": "OAuth-only login flow"
+  },
+  {
+   "id": "google-pse",
+   "name": "Google PSE",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "google-tts",
+   "name": "Google TTS",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "grok-cli",
+   "name": "Grok CLI (Grok Build)",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "grok-web",
+   "name": "Grok Web (Subscription)",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "huggingface",
+   "name": "HuggingFace",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "iflow",
+   "name": "iFlow AI",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "inworld",
+   "name": "Inworld TTS",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "jina-ai",
+   "name": "Jina AI",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "jina-reader",
+   "name": "Jina Reader",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "kilocode",
+   "name": "Kilo Code",
+   "reason": "OAuth-only login flow"
+  },
+  {
+   "id": "kimchi",
+   "name": "Kimchi",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "kiro",
+   "name": "Kiro AI",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "linkup",
+   "name": "Linkup",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "local-device",
+   "name": "Local Device",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "mimo-free",
+   "name": "MiMo Code Free",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "minimax-code",
+   "name": "MiniMax Code",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "minimax-code-global",
+   "name": "MiniMax Code (Global)",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "ollama",
+   "name": "Ollama Cloud",
+   "reason": "wire format \"ollama\" not implemented"
+  },
+  {
+   "id": "ollama-local",
+   "name": "Ollama Local",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "ollama-search",
+   "name": "Ollama Search",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "opencode",
+   "name": "OpenCode Free",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "opencode-go",
+   "name": "OpenCode Go",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "opencode-zen",
+   "name": "OpenCode Zen",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "perplexity-agent",
+   "name": "Perplexity Agent",
+   "reason": "wire format \"openai-responses\" not implemented"
+  },
+  {
+   "id": "perplexity-web",
+   "name": "Perplexity Web (Pro/Max)",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "playht",
+   "name": "PlayHT",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "qoder",
+   "name": "Qoder",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "qoder-cn",
+   "name": "Qoder CN",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "recraft",
+   "name": "Recraft",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "runwayml",
+   "name": "Runway ML",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "sdwebui",
+   "name": "SD WebUI",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "searchapi",
+   "name": "SearchAPI",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "searxng",
+   "name": "SearXNG",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "selfhosted-embedding",
+   "name": "Self-hosted Embedding",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "selfhosted-stt",
+   "name": "Self-hosted STT",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "selfhosted-tts",
+   "name": "Self-hosted TTS",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "serper",
+   "name": "Serper",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "stability-ai",
+   "name": "Stability AI",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "tavily",
+   "name": "Tavily",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "tinyfish",
+   "name": "TinyFish",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "topaz",
+   "name": "Topaz",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "tortoise",
+   "name": "Tortoise TTS",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "v1m",
+   "name": "v1m (System One)",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "vertex",
+   "name": "Vertex AI",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "vertex-partner",
+   "name": "Vertex Partner",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "voyage-ai",
+   "name": "Voyage AI",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "xiaomi-mimo",
+   "name": "Xiaomi MiMo",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "xiaomi-tokenplan",
+   "name": "Xiaomi MiMo (Token Plan)",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "xquik",
+   "name": "Xquik",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "youcom",
+   "name": "You.com Search",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "zed",
+   "name": "Zed",
+   "reason": "needs a dedicated executor"
+  }
+ ]
+}

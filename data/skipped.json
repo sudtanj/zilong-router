@@ -48,12 +48,7 @@
   {
    "id": "claude",
    "name": "Claude Code",
-   "reason": "OAuth-only login flow"
-  },
-  {
-   "id": "cline",
-   "name": "Cline",
-   "reason": "OAuth-only login flow"
+   "reason": "marked deprecated upstream"
   },
   {
    "id": "codebuddy-cn",
@@ -133,7 +128,7 @@
   {
    "id": "github",
    "name": "GitHub Copilot",
-   "reason": "needs a dedicated executor"
+   "reason": "marked deprecated upstream"
   },
   {
    "id": "gitlab",
@@ -186,11 +181,6 @@
    "reason": "no LLM transport (media-only provider)"
   },
   {
-   "id": "kilocode",
-   "name": "Kilo Code",
-   "reason": "OAuth-only login flow"
-  },
-  {
    "id": "kimchi",
    "name": "Kimchi",
    "reason": "needs a dedicated executor"
@@ -209,21 +199,6 @@
    "id": "local-device",
    "name": "Local Device",
    "reason": "no LLM transport (media-only provider)"
-  },
-  {
-   "id": "mimo-free",
-   "name": "MiMo Code Free",
-   "reason": "needs a dedicated executor"
-  },
-  {
-   "id": "minimax-code",
-   "name": "MiniMax Code",
-   "reason": "needs a dedicated executor"
-  },
-  {
-   "id": "minimax-code-global",
-   "name": "MiniMax Code (Global)",
-   "reason": "needs a dedicated executor"
   },
   {
    "id": "ollama",

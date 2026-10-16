@@ -1,23 +1,25 @@
 //! Request-time quirks of the OAuth and free providers: extra headers (upstream
 //! `executors/default.js` HEADER_HOOKS), GitHub Copilot routing and body fixes
 //! (`executors/github.js`), the MiMo free-tier JWT (`executors/mimo-free.js`) and
-//! Claude Code identity for Claude OAuth tokens (`utils/claudeCloaking.js`).
+//! Claude Code identity for Claude OAuth tokens (`utils/claudeCloaking.js`). OpenCode
+//! Free lives in `opencode.rs`.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
 use anyhow::{bail, Result};
+use axum::http::HeaderMap;
 use parking_lot::Mutex;
 use serde_json::{json, Value};
 
-use super::util;
+use super::{opencode, util};
 use crate::db::ProviderConnection;
 use crate::providers::{Format, Provider, Transport};
 use crate::sse::Event;
 use crate::state::AppState;
 
 const GITHUB_MESSAGES: &str = "https://api.githubcopilot.com/v1/messages";
-const ANTHROPIC_VERSION: &str = "2023-06-01";
+pub(crate) const ANTHROPIC_VERSION: &str = "2023-06-01";
 
 pub const CLAUDE_SYSTEM_PROMPT: &str = "You are Claude Code, Anthropic's official CLI for Claude.";
 const CLAUDE_CLI_VERSION: &str = "2.1.280";
@@ -70,17 +72,55 @@ pub fn patch_registry(providers: &mut [Provider]) {
                 p.transports = Some(vec![Transport { format: Format::Openai, ..t }, claude]);
             }
         }
+        if p.id == opencode::ID {
+            opencode::patch(p);
+        }
     }
 }
 
-/// GitHub serves Claude models on its Anthropic `/v1/messages` shim (the only Copilot
-/// endpoint that reports prompt-cache tokens), everything else on chat completions.
+/// Endpoint chosen by model rather than by client format. GitHub serves Claude
+/// models on its Anthropic `/v1/messages` shim (the only Copilot endpoint that
+/// reports prompt-cache tokens), everything else on chat completions; OpenCode
+/// serves `union-alpha` on `/messages` only.
 pub fn transport_for<'a>(p: &'a Provider, model: &str) -> Option<&'a Transport> {
-    if p.id != "github" {
-        return None;
+    match p.id.as_str() {
+        "github" => {
+            let want = if model.to_ascii_lowercase().contains("claude") { Format::Claude } else { Format::Openai };
+            p.transports.as_ref()?.iter().find(|t| t.format == want)
+        }
+        opencode::ID => opencode::transport_for(p, model),
+        _ => None,
     }
-    let want = if model.to_ascii_lowercase().contains("claude") { Format::Claude } else { Format::Openai };
-    p.transports.as_ref()?.iter().find(|t| t.format == want)
+}
+
+/// Tool names the provider hook changed, to be put back in the response.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum Restore {
+    #[default]
+    None,
+    /// Claude OAuth cloaking: strip the `_ide` suffix.
+    ClaudeSuffix,
+    /// Sent name -> the caller's name (OpenCode fingerprint conflicts).
+    Names(HashMap<String, String>),
+}
+
+impl Restore {
+    fn original<'a>(&'a self, sent: &'a str) -> Option<&'a str> {
+        match self {
+            Restore::None => None,
+            Restore::ClaudeSuffix => sent.strip_suffix(CLAUDE_TOOL_SUFFIX).filter(|n| !n.is_empty()),
+            Restore::Names(m) => m.get(sent).map(String::as_str),
+        }
+    }
+
+    /// Whether `data` may mention a changed name (cheap pre-check for stream events).
+    fn mentioned_in(&self, data: &str) -> bool {
+        match self {
+            Restore::None => false,
+            Restore::ClaudeSuffix => data.contains(CLAUDE_TOOL_SUFFIX),
+            Restore::Names(m) => m.keys().any(|k| data.contains(k.as_str())),
+        }
+    }
 }
 
 fn set(h: &mut HashMap<String, String>, k: &str, v: impl Into<String>) {
@@ -100,11 +140,13 @@ fn psd_str<'a>(c: &'a ProviderConnection, k: &str) -> Option<&'a str> {
 pub fn headers(
     provider: &Provider,
     conn: &ProviderConnection,
+    client: &HeaderMap,
     model: &str,
     body: &Value,
     h: &mut HashMap<String, String>,
 ) {
     match provider.id.as_str() {
+        opencode::ID => opencode::headers(client, model, h),
         "kimi" => {
             for (k, v) in util::kimi_headers(psd_str(conn, "deviceId")) {
                 set(h, k, v);
@@ -216,30 +258,35 @@ fn claude_session_id(body: &Value) -> Option<String> {
 }
 
 /// Provider-specific body rewrites, applied per account right before sending.
-/// Returns the new body and whether tool names in the response must be restored.
+/// Returns the new body and which tool names in the response must be restored.
 pub fn body(
     provider: &str,
     conn: &ProviderConnection,
     target: Format,
     model: &str,
     body: &Value,
-) -> Option<(Value, bool)> {
+) -> Option<(Value, Restore)> {
     match provider {
         "claude" if target == Format::Claude && is_claude_oauth(conn) => {
             let mut b = body.clone();
             claude_identity(&mut b, conn.secret().unwrap_or(""));
             let cloaked = cloak_tools(&mut b);
-            Some((b, cloaked))
+            Some((b, if cloaked { Restore::ClaudeSuffix } else { Restore::None }))
         }
         "github" if target == Format::Openai => {
             let mut b = body.clone();
             github_body(model, &mut b);
-            Some((b, false))
+            Some((b, Restore::None))
         }
         p if is_mimo(p) && target == Format::Openai => {
             let mut b = body.clone();
             mimo_marker(&mut b);
-            Some((b, false))
+            Some((b, Restore::None))
+        }
+        opencode::ID => {
+            let mut b = body.clone();
+            let renamed = opencode::body(&mut b, target);
+            Some((b, if renamed.is_empty() { Restore::None } else { Restore::Names(renamed) }))
         }
         _ => None,
     }
@@ -326,35 +373,48 @@ fn cloak_tools(body: &mut Value) -> bool {
     !renamed.is_empty()
 }
 
-fn decloak_name(name: &str) -> Option<&str> {
-    name.strip_suffix(CLAUDE_TOOL_SUFFIX).filter(|n| !n.is_empty())
-}
-
-/// Restore cloaked tool names in a streamed Claude event (`content_block_start`).
-pub fn decloak_event(ev: &mut Event) {
-    if !ev.data.contains("content_block_start") || !ev.data.contains(CLAUDE_TOOL_SUFFIX) {
+/// Restore tool names in an upstream stream event (still in the upstream format).
+pub fn decloak_event(ev: &mut Event, restore: &Restore) {
+    if !restore.mentioned_in(&ev.data) {
         return;
     }
     let Ok(mut v) = serde_json::from_str::<Value>(&ev.data) else { return };
-    let block = &mut v["content_block"];
-    if block.get("type").and_then(Value::as_str) != Some("tool_use") {
-        return;
-    }
-    if let Some(n) = block.get("name").and_then(Value::as_str).and_then(decloak_name).map(str::to_string) {
-        block["name"] = json!(n);
+    if decloak_json(&mut v, restore) {
         ev.data = v.to_string();
     }
 }
 
-/// Restore cloaked tool names in a complete Claude response.
-pub fn decloak_json(v: &mut Value) {
+/// Restore tool names in a Claude event or message, or an OpenAI chunk or completion.
+/// Returns whether anything changed.
+pub fn decloak_json(v: &mut Value, restore: &Restore) -> bool {
+    let mut changed = false;
+    let mut fix = |slot: Option<&mut Value>| {
+        let Some(slot) = slot else { return };
+        if let Some(n) = slot.as_str().and_then(|s| restore.original(s)).map(str::to_string) {
+            *slot = json!(n);
+            changed = true;
+        }
+    };
+    let is_tool_use = |b: &Value| b.get("type").and_then(Value::as_str) == Some("tool_use");
+    // Claude: streamed content_block_start, complete message content.
+    if v.get("type").and_then(Value::as_str) == Some("content_block_start") && is_tool_use(&v["content_block"]) {
+        fix(v.pointer_mut("/content_block/name"));
+    }
     for b in v.get_mut("content").and_then(Value::as_array_mut).into_iter().flatten() {
-        if b.get("type").and_then(Value::as_str) == Some("tool_use") {
-            if let Some(n) = b.get("name").and_then(Value::as_str).and_then(decloak_name).map(str::to_string) {
-                b["name"] = json!(n);
+        if is_tool_use(b) {
+            fix(b.get_mut("name"));
+        }
+    }
+    // OpenAI: tool calls in stream deltas and complete messages.
+    for c in v.get_mut("choices").and_then(Value::as_array_mut).into_iter().flatten() {
+        for holder in ["delta", "message"] {
+            let calls = c.get_mut(holder).and_then(|h| h.get_mut("tool_calls")).and_then(Value::as_array_mut);
+            for call in calls.into_iter().flatten() {
+                fix(call.pointer_mut("/function/name"));
             }
         }
     }
+    changed
 }
 
 /// Response fix-ups: Cline wraps non-streamed answers in `{success, data}`.
@@ -506,7 +566,7 @@ mod tests {
             "tool_choice": {"type": "tool", "name": "lookup"},
         });
         let (b, cloaked) = super::body("claude", &c, Format::Claude, "claude-sonnet-5", &body).unwrap();
-        assert!(cloaked);
+        assert_eq!(cloaked, Restore::ClaudeSuffix);
         assert!(text(&b["system"][0]).starts_with("x-anthropic-billing-header: cc_version="));
         assert_eq!(text(&b["system"][1]), CLAUDE_SYSTEM_PROMPT);
         assert_eq!(text(&b["system"][2]), "be brief");
@@ -524,10 +584,10 @@ mod tests {
         let mut ev = Event::data(
             r#"{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"t","name":"lookup_ide","input":{}}}"#,
         );
-        decloak_event(&mut ev);
+        decloak_event(&mut ev, &Restore::ClaudeSuffix);
         assert!(ev.data.contains(r#""name":"lookup""#));
         let mut doc = json!({"content": [{"type": "tool_use", "name": "Read_ide"}, {"type": "text", "text": "x_ide"}]});
-        decloak_json(&mut doc);
+        assert!(decloak_json(&mut doc, &Restore::ClaudeSuffix));
         assert_eq!(doc["content"][0]["name"], "Read");
     }
 
@@ -543,7 +603,7 @@ mod tests {
         let mut h = HashMap::from([("authorization".to_string(), "Bearer old".to_string())]);
         if let Some(gh) = reg.get("github") {
             let c = conn("github", json!({"accessToken": "gho", "providerSpecificData": {"copilotToken": "cp"}}));
-            headers(gh, &c, "gpt-4o", &json!({}), &mut h);
+            headers(gh, &c, &HeaderMap::new(), "gpt-4o", &json!({}), &mut h);
             assert_eq!(h.get("Authorization").map(String::as_str), Some("Bearer cp"));
             assert!(!h.contains_key("authorization"));
             assert_eq!(gh.transport_for(Format::Claude, "gpt-4o").unwrap().format, Format::Openai);

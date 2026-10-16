@@ -161,7 +161,7 @@ pub fn build_headers(
             h.insert(key, set.join(","));
         }
     }
-    crate::oauth::hooks::headers(provider, conn, model, body, &mut h);
+    crate::oauth::hooks::headers(provider, conn, client, model, body, &mut h);
     if let Some(Value::Object(over)) =
         state.db.settings().pointer(&format!("/providerOverrides/{}/headers", provider.id))
     {

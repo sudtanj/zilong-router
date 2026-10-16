@@ -47,7 +47,7 @@ try {
   // Upstream-special providers mini-router implements natively (src/oauth): their
   // sign-in, token refresh and request quirks are ported, so keep them.
   const RISK_NOTICE = "⚠️ Risk Notice: This provider uses a subscription/OAuth session not officially licensed for proxy/router use. Account may be restricted or banned. Use at your own risk.";
-  const NATIVE = new Set(["claude", "cline", "clinepass", "github", "kilocode", "kimi", "mimo-free", "minimax-code", "minimax-code-global", "muse", "nous", "xai"]);
+  const NATIVE = new Set(["claude", "cline", "clinepass", "github", "kilocode", "kimi", "mimo-free", "minimax-code", "minimax-code-global", "muse", "nous", "opencode", "xai"]);
   const SUPPORTED_FORMATS = new Set(["openai", "claude"]);
   const skipped = [];
   const skip = (e, reason) => skipped.push({ id: e.id, name: e.display?.name || e.id, reason });

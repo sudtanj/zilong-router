@@ -12,6 +12,7 @@ use serde_json::Value;
 
 use crate::db::ProviderConnection;
 use crate::model::Resolved;
+use crate::oauth::opencode;
 use crate::state::AppState;
 
 const TTL_OK: Duration = Duration::from_secs(30 * 60);
@@ -30,14 +31,59 @@ pub async fn auto_candidates(
     connections: &[ProviderConnection],
     explicit: &[String],
 ) -> Vec<Resolved> {
-    let custom = state.db.kv_scope("customModels").unwrap_or_default();
+    let mut custom = state.db.kv_scope("customModels").unwrap_or_default();
     let mut discovered = HashMap::new();
     if explicit.is_empty() {
         let wanted = crate::model::needs_live_models(&state.registry, connections, &custom);
         let lists = futures_util::future::join_all(wanted.iter().map(|c| models_for(state, c))).await;
         discovered = wanted.iter().map(|c| c.id.clone()).zip(lists).collect();
+        // OpenCode's catalogue lists one model; its free chat models come from a live list.
+        if state.registry.get(opencode::ID).is_some() {
+            let free = opencode_free(state).await;
+            let entry = custom.entry(opencode::ID.to_string()).or_insert_with(|| Value::Array(Vec::new()));
+            if let Value::Array(list) = entry {
+                list.extend(free.into_iter().map(Value::String));
+            }
+        }
     }
     crate::model::auto_candidates(&state.registry, aliases, connections, explicit, &custom, &discovered)
+}
+
+/// OpenCode Free's chat models, cached like account model lists.
+pub async fn opencode_free(state: &AppState) -> Vec<String> {
+    const KEY: &str = "opencode:free";
+    if state.registry.get(opencode::ID).is_none() {
+        return Vec::new();
+    }
+    let cached = state.model_cache.lock().get(KEY).cloned();
+    if let Some((at, list)) = cached {
+        if at.elapsed() < if list.is_empty() { TTL_ERR } else { TTL_OK } {
+            return list;
+        }
+    }
+    let fetched = async {
+        let resp = state
+            .http
+            .get(opencode::MODELS_URL)
+            .header("Authorization", "Bearer public")
+            .header("User-Agent", opencode::USER_AGENT)
+            .timeout(TIMEOUT)
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            bail!("{} answered {}", opencode::MODELS_URL, resp.status());
+        }
+        Ok::<_, anyhow::Error>(opencode::free_models(parse_ids(&resp.json::<Value>().await?)))
+    };
+    let list = match fetched.await {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::info!("auto: cannot list OpenCode Free models: {e}");
+            Vec::new()
+        }
+    };
+    state.model_cache.lock().insert(KEY.to_string(), (Instant::now(), list.clone()));
+    list
 }
 
 /// Model ids an account's endpoint advertises (empty when it can't be listed).

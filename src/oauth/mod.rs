@@ -13,6 +13,7 @@
 //! `refreshToken`, `expiresAt`, `providerSpecificData`), `authType` "oauth".
 
 pub mod hooks;
+pub mod opencode;
 pub mod util;
 
 use std::collections::HashMap;

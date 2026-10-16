@@ -21,6 +21,7 @@ use super::ApiError;
 use crate::auth::{authenticate, AuthError, Caller};
 use crate::db::ProviderConnection;
 use crate::executor::{self, ExecError};
+use crate::oauth::hooks::Restore;
 use crate::providers::Format;
 use crate::router::{self, Pick, Verdict};
 use crate::sse;
@@ -256,8 +257,10 @@ async fn attempt(
     let upstream_model = provider.upstream_model_id(&resolved.model).to_string();
     let mut upstream_body = translator::translate_request(source, target, body.clone(), &upstream_model)
         .map_err(|e| ApiError::new(406, source, e))?;
-    upstream_body["stream"] = json!(client_stream);
-    if client_stream && target == Format::Openai && upstream_body.get("stream_options").is_none() {
+    // Some upstreams only answer streamed requests; the stream is collapsed for JSON clients.
+    let upstream_stream = client_stream || transport.force_stream;
+    upstream_body["stream"] = json!(upstream_stream);
+    if upstream_stream && target == Format::Openai && upstream_body.get("stream_options").is_none() {
         upstream_body["stream_options"] = json!({"include_usage": true});
     }
     let saver = crate::token_saver::Options::from_settings(&state.db.settings(), headers);
@@ -323,11 +326,11 @@ async fn attempt(
         let level = conn.data.get("backoffLevel").and_then(Value::as_i64).unwrap_or(0);
         let patched = crate::oauth::hooks::body(&provider.id, &conn, target, &upstream_model, &upstream_body);
         let (send_body, decloak) = match &patched {
-            Some((b, d)) => (b, *d),
-            None => (&upstream_body, false),
+            Some((b, r)) => (b, r.clone()),
+            None => (&upstream_body, Restore::None),
         };
 
-        match executor::send(&state, provider, transport, &conn, &upstream_model, send_body, &headers, client_stream)
+        match executor::send(&state, provider, transport, &conn, &upstream_model, send_body, &headers, upstream_stream)
             .await
         {
             Ok(resp) => {
@@ -414,8 +417,8 @@ struct ReqCtx {
     body_len: usize,
     source: Format,
     target: Format,
-    /// Claude OAuth tool names were cloaked; restore them in the response.
-    decloak: bool,
+    /// Tool names a provider hook changed; restored in the response.
+    decloak: Restore,
 }
 
 impl ReqCtx {
@@ -451,7 +454,7 @@ async fn json_response(ctx: ReqCtx, resp: reqwest::Response, client_stream: bool
     let text = resp.text().await.map_err(|e| ApiError::new(502, ctx.source, format!("reading upstream body: {e}")))?;
     let v: Value = if upstream_sse {
         // Upstream insisted on streaming; collapse it into one JSON document.
-        collapse_sse(&text, ctx.target, ctx.source, &ctx.model, ctx.decloak)
+        collapse_sse(&text, ctx.target, ctx.source, &ctx.model, &ctx.decloak)
     } else {
         let mut v: Value = serde_json::from_str(&text).map_err(|_| {
             ApiError::new(
@@ -461,9 +464,7 @@ async fn json_response(ctx: ReqCtx, resp: reqwest::Response, client_stream: bool
             )
         })?;
         crate::oauth::hooks::fix_response(&ctx.provider, &mut v);
-        if ctx.decloak {
-            crate::oauth::hooks::decloak_json(&mut v);
-        }
+        crate::oauth::hooks::decloak_json(&mut v, &ctx.decloak);
         translator::translate_response(ctx.target, ctx.source, &v, &ctx.model)
     };
     let tokens = usage::extract(&v).unwrap_or_default();
@@ -486,14 +487,12 @@ async fn json_response(ctx: ReqCtx, resp: reqwest::Response, client_stream: bool
 }
 
 /// Replay a full SSE body through the stream translator and assemble the final JSON.
-fn collapse_sse(text: &str, from: Format, to: Format, model: &str, decloak: bool) -> Value {
+fn collapse_sse(text: &str, from: Format, to: Format, model: &str, decloak: &Restore) -> Value {
     let mut parser = sse::Parser::default();
     let mut tr = StreamTranslator::new(from, to, model);
     let mut events = Vec::new();
     for mut ev in parser.push(text.as_bytes()).into_iter().chain(parser.finish()) {
-        if decloak {
-            crate::oauth::hooks::decloak_event(&mut ev);
-        }
+        crate::oauth::hooks::decloak_event(&mut ev, decloak);
         events.extend(tr.feed(&ev));
     }
     events.extend(tr.finish());
@@ -711,9 +710,7 @@ fn stream_response(ctx: ReqCtx, resp: reqwest::Response) -> Response {
                 }
                 Ok(None) => {
                     if let Some(mut ev) = parser.finish() {
-                        if ctx.decloak {
-                            crate::oauth::hooks::decloak_event(&mut ev);
-                        }
+                        crate::oauth::hooks::decloak_event(&mut ev, &ctx.decloak);
                         for out in tr.feed(&ev) {
                             let _ = tx.send(Ok(out.to_bytes())).await;
                         }
@@ -734,9 +731,7 @@ fn stream_response(ctx: ReqCtx, resp: reqwest::Response) -> Response {
                 ttft = Some(ctx.started.elapsed().as_millis());
             }
             for mut ev in parser.push(&chunk) {
-                if ctx.decloak {
-                    crate::oauth::hooks::decloak_event(&mut ev);
-                }
+                crate::oauth::hooks::decloak_event(&mut ev, &ctx.decloak);
                 for out in tr.feed(&ev) {
                     if tx.send(Ok(out.to_bytes())).await.is_err() {
                         client_gone = true;

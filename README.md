@@ -100,13 +100,19 @@ for a Copilot token and send Claude models to Copilot's `/v1/messages`. Kimi, Cl
 MiniMax, Muse and Kilo get their client headers.
 
 Free providers need no account: **MiMo Free** (`mimo-free`, `mmf`) fetches a free-tier
-token by itself. Local Ollama is best added as an OpenAI-compatible endpoint
-(`http://<host>:11434/v1`).
+token by itself. **OpenCode Free** (`opencode`, `oc`) sends requests the way the OpenCode
+v2 CLI does: its user agent and session headers, always streamed, with OpenCode's `read`
+and `shell` tools declared next to yours. The free tier refuses requests without them, and
+the model is told not to call them. Its free chat models (`-free` ids plus `big-pickle`)
+come from `opencode.ai/zen/v1/models` and show up in `/v1/models` and `auto`;
+`union-alpha` goes to its Anthropic endpoint. The Muse Spark models need the OpenAI
+Responses API and are left out. Local Ollama is best added as an OpenAI-compatible
+endpoint (`http://<host>:11434/v1`).
 
 Not ported, because they need a proprietary protocol or impersonate an IDE (see
 `data/skipped.json`): Cursor, Windsurf, Kiro, Qoder, Trae, Zed, Codex (Responses API),
-Gemini CLI / Antigravity (Gemini format), Devin CLI, OpenCode, iFlow, CodeBuddy, Kimchi,
-GitLab Duo.
+Gemini CLI / Antigravity (Gemini format), Devin CLI, OpenCode Zen / Go, iFlow, CodeBuddy,
+Kimchi, GitLab Duo.
 
 ## Token Saver
 

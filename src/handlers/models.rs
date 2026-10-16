@@ -24,7 +24,8 @@ fn auth(state: &AppState, peer: SocketAddr, headers: &HeaderMap, query: &str) ->
     })
 }
 
-fn model_entries(state: &AppState, caller: &Caller) -> anyhow::Result<Vec<Value>> {
+/// `opencode_free`: OpenCode Free's live chat models, listed next to its catalogue.
+fn model_entries(state: &AppState, caller: &Caller, opencode_free: &[String]) -> anyhow::Result<Vec<Value>> {
     let conns = state.db.all_connections()?;
     let active: BTreeSet<&str> = conns.iter().filter(|c| c.is_active).map(|c| c.provider.as_str()).collect();
     let created = state.started_at.elapsed().as_secs() as i64;
@@ -39,16 +40,18 @@ fn model_entries(state: &AppState, caller: &Caller) -> anyhow::Result<Vec<Value>
         if !active.contains(p.id.as_str()) && !p.no_auth {
             continue;
         }
-        for m in &p.models {
-            if !caller.may_use(&p.id, &m.id) {
+        let live: &[String] = if p.id == crate::oauth::opencode::ID { opencode_free } else { &[] };
+        let live = live.iter().filter(|id| p.model(id).is_none()).map(|id| (id.as_str(), id.as_str()));
+        for (id, name) in p.models.iter().map(|m| (m.id.as_str(), m.name.as_str())).chain(live) {
+            if !caller.may_use(&p.id, id) {
                 continue;
             }
             out.push(json!({
-                "id": format!("{}/{}", p.alias, m.id),
+                "id": format!("{}/{}", p.alias, id),
                 "object": "model",
                 "created": created,
                 "owned_by": p.id,
-                "name": m.name,
+                "name": name,
             }));
         }
     }
@@ -66,7 +69,8 @@ pub async fn list_openai(
 ) -> Result<impl IntoResponse, ApiError> {
     let query = q.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join("&");
     let caller = auth(&state, peer, &headers, &query)?;
-    let data = model_entries(&state, &caller).map_err(|e| ApiError::new(500, Format::Openai, e.to_string()))?;
+    let free = crate::discovery::opencode_free(&state).await;
+    let data = model_entries(&state, &caller, &free).map_err(|e| ApiError::new(500, Format::Openai, e.to_string()))?;
     Ok(Json(json!({"object": "list", "data": data})))
 }
 
@@ -77,7 +81,8 @@ pub async fn get_openai(
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
     let caller = auth(&state, peer, &headers, "")?;
-    let data = model_entries(&state, &caller).map_err(|e| ApiError::new(500, Format::Openai, e.to_string()))?;
+    let free = crate::discovery::opencode_free(&state).await;
+    let data = model_entries(&state, &caller, &free).map_err(|e| ApiError::new(500, Format::Openai, e.to_string()))?;
     data.into_iter()
         .find(|m| m["id"] == id)
         .map(Json)

@@ -564,15 +564,11 @@ fn stream_response(ctx: ReqCtx, resp: reqwest::Response) -> Response {
                 Ok(None) => {
                     if let Some(ev) = parser.finish() {
                         for out in tr.feed(&ev) {
-                            if tx.send(Ok(out.to_bytes())).await.is_err() {
-                                client_gone = true;
-                            }
+                            let _ = tx.send(Ok(out.to_bytes())).await;
                         }
                     }
                     for out in tr.finish() {
-                        if tx.send(Ok(out.to_bytes())).await.is_err() {
-                            client_gone = true;
-                        }
+                        let _ = tx.send(Ok(out.to_bytes())).await;
                     }
                     break;
                 }

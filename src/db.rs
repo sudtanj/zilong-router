@@ -408,7 +408,8 @@ impl Db {
         self.with(|c| {
             let sql = format!("SELECT {} FROM apiKeys ORDER BY createdAt", Self::KEY_COLS);
             let mut st = c.prepare(&sql)?;
-            st.query_map([], Self::row_to_key)?.collect()
+            let keys = st.query_map([], Self::row_to_key)?.collect();
+            keys
         })
     }
 

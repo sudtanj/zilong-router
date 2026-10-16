@@ -466,7 +466,8 @@ pub async fn delete_custom_model(State(state): S, Path((prefix, model)): Path<(S
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
     let list: Vec<String> = list.into_iter().filter(|m| m != &model).collect();
-    state.db.kv_set("customModels", &prefix, if list.is_empty() { None } else { Some(&json!(list)) })?;
+    let value = json!(list);
+    state.db.kv_set("customModels", &prefix, if list.is_empty() { None } else { Some(&value) })?;
     Ok(Json(json!(list)))
 }
 

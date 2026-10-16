@@ -165,7 +165,7 @@ pub fn openai_to_claude(body: &Value, model: &str) -> Value {
                     Value::String(x) if x == "required" => Some(json!({"type": "any"})),
                     Value::String(x) if x == "none" => None, // handled below by dropping tools
                     Value::String(_) => Some(json!({"type": "auto"})),
-                    Value::Object(o) => match o.pointer("/function/name").and_then(Value::as_str) {
+                    Value::Object(o) => match o.get("function").and_then(|f| f.get("name")).and_then(Value::as_str) {
                         Some(n) => Some(json!({"type": "tool", "name": n})),
                         None if matches!(s(tc, "type").as_deref(), Some("auto" | "any" | "tool" | "none")) => {
                             Some(tc.clone())

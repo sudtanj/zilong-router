@@ -29,6 +29,7 @@ use axum::Router;
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
+use crate::config::Config;
 use crate::state::AppState;
 
 fn main() -> anyhow::Result<()> {

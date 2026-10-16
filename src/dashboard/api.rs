@@ -396,6 +396,54 @@ pub async fn delete_alias(State(state): S, Path(alias): Path<String>) -> R {
     Ok(Json(json!({"ok": true})))
 }
 
+// ----- auto model ----------------------------------------------------------------
+
+/// What `model: "auto"` would try right now, in order, and whether each candidate
+/// has an account that is not cooling down.
+pub async fn auto_preview(State(state): S) -> R {
+    let settings = state.db.settings();
+    let explicit: Vec<String> = settings
+        .get("autoModels")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|m| m.as_str().map(str::to_string))
+        .collect();
+    let max = settings.get("autoMaxAttempts").and_then(Value::as_u64).unwrap_or(5).max(1);
+    let aliases = state.db.kv_scope("modelAliases")?;
+    let conns = state.db.all_connections()?;
+    let now = OffsetDateTime::now_utc();
+    let candidates: Vec<Value> = crate::model::auto_candidates(&state.registry, &aliases, &conns, &explicit)
+        .into_iter()
+        .take(60)
+        .map(|c| {
+            let p = state.registry.get(&c.provider);
+            let supported = p
+                .and_then(|p| p.transport_for(crate::providers::Format::Openai, &c.model))
+                .map(|t| t.format.supported())
+                .unwrap_or(false);
+            let accounts: Vec<&ProviderConnection> =
+                conns.iter().filter(|a| a.provider == c.provider && a.is_active).collect();
+            let no_auth = p.map(|p| p.no_auth).unwrap_or(false);
+            let free = accounts.iter().any(|a| crate::router::active_lock_until(a, &c.model, now).is_none());
+            json!({
+                "model": format!("{}/{}", p.map(|p| p.alias.as_str()).unwrap_or(&c.provider), c.model),
+                "provider": c.provider,
+                "providerName": p.map(|p| p.name()).unwrap_or(&c.provider),
+                "accounts": accounts.len(),
+                "supported": supported,
+                "ready": supported && (no_auth || free),
+            })
+        })
+        .collect();
+    Ok(Json(json!({
+        "source": if explicit.is_empty() { "accounts" } else { "autoModels" },
+        "autoModels": explicit,
+        "maxAttempts": max,
+        "candidates": candidates,
+    })))
+}
+
 // ----- settings ------------------------------------------------------------------
 
 fn redact(mut v: Value) -> Value {

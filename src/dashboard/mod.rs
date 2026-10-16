@@ -173,6 +173,7 @@ pub fn routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/aliases", get(api::aliases).post(api::set_alias))
         .route("/aliases/:alias", delete(api::delete_alias))
         .route("/settings", get(api::settings).patch(api::patch_settings))
+        .route("/auto", get(api::auto_preview))
         .route("/password", post(api::change_password))
         .route("/usage", get(api::usage))
         .route("/custom-models/:prefix", get(api::custom_models).post(api::add_custom_model))

@@ -166,6 +166,7 @@ async fn handle_inner(
     let candidates = crate::model::auto_candidates(&state.registry, &aliases, &connections, &explicit);
 
     let mut last: Option<ApiError> = None;
+    let mut failures: Vec<String> = Vec::new();
     let (mut sent, mut tried_models) = (0usize, 0usize);
     for c in candidates {
         let Some(p) = state.registry.get(&c.provider) else { continue };
@@ -188,6 +189,11 @@ async fn handle_inner(
                     e.status.as_u16(),
                     e.message
                 );
+                failures.push(format!(
+                    "{label}: {} {}",
+                    e.status.as_u16(),
+                    e.message.chars().take(160).collect::<String>()
+                ));
                 last = Some(e);
                 // Models whose accounts are all missing or cooling down cost no upstream
                 // call; only models that were actually tried count against the budget.
@@ -202,7 +208,7 @@ async fn handle_inner(
         }
     }
     Err(match last {
-        Some(e) => ApiError { message: format!("auto: no model succeeded; last error: {}", e.message), ..e },
+        Some(e) => ApiError { message: format!("auto: no model succeeded. Tried: {}", failures.join(" | ")), ..e },
         None => ApiError::new(
             404,
             source,

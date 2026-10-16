@@ -216,7 +216,8 @@ actions.copy = async ({text}, b) => {
 // ----- Endpoint & Key (upstream EndpointPageClient) -------------------------------
 let keyCache = [], settingsCache = {}, visibleKeys = new Set();
 pages.endpoint = async () => {
-  [keyCache, settingsCache] = await Promise.all([get('/keys'), get('/settings')]);
+  const [keys, settings, auto] = await Promise.all([get('/keys'), get('/settings'), get('/auto').catch(() => null)]);
+  keyCache = keys; settingsCache = settings;
   const origin = location.origin;
   const isRemote = !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
   const endpointRow = (label, url, on) => `<div class="row">
@@ -229,10 +230,12 @@ pages.endpoint = async () => {
       <div class="col gap2">
         ${endpointRow('Local', origin + '/v1', false)}
         ${endpointRow('Anthropic', origin, false)}
-        <p class="xs muted mt1">OpenAI-style tools use the <code>/v1</code> URL. Anthropic-style tools (Claude Code) use the origin as <code>ANTHROPIC_BASE_URL</code>. Models are <code>provider/model</code>.</p>
+        <p class="xs muted mt1">OpenAI-style tools use the <code>/v1</code> URL. Anthropic-style tools (Claude Code) use the origin as <code>ANTHROPIC_BASE_URL</code>. Models are <code>provider/model</code>, or <code>auto</code>.</p>
       </div>
       ${!settingsCache.hasPassword && isRemote ? `<div class="mt4">${securityWarning('Dashboard uses the default password — change it in Settings.', '#/profile', 'Change password')}</div>` : ''}
     </div>
+
+    ${auto ? autoCard(auto, origin) : ''}
 
     <div class="card" id="require-api-key">
       <div class="row between mb4">
@@ -252,6 +255,58 @@ pages.endpoint = async () => {
         : `<div class="col">${keyCache.map(keyRow).join('')}</div>`}
     </div>
   </div>`;
+};
+const autoCard = (a, origin) => {
+  const example = `curl ${origin}/v1/chat/completions \\
+  -H "Authorization: Bearer <api-key>" -H "Content-Type: application/json" \\
+  -d '{"model":"auto","messages":[{"role":"user","content":"Hello"}]}'`;
+  const rows = a.candidates.slice(0, 12).map((c, i) => `<div class="row between" style="padding:4px 0">
+      <span class="sm"><span class="muted">${i + 1}.</span> <code>${esc(c.model)}</code> <span class="xs muted">${esc(c.providerName)}</span></span>
+      ${!c.supported ? '<span class="badge sm warning">format not supported</span>'
+        : c.ready ? '<span class="badge sm success"><span class="dot"></span>ready</span>'
+        : '<span class="badge sm error"><span class="dot"></span>cooling down</span>'}</div>`).join('');
+  return `<div class="card" id="auto-model">
+    <div class="row between mb4">
+      <h2 class="ct">${ms('auto_awesome')}Auto model</h2>
+      <button class="btn ghost" data-act="editAuto">${ms('tune')}Configure</button>
+    </div>
+    <p class="sm muted mb4">Use model <code>auto</code> (like OpenRouter's <code>openrouter/auto</code>) and mini-router sends the request to the first model that answers, skipping accounts that are cooling down. The model that answered is returned in the <code>x-mini-router-model</code> response header.</p>
+    <div class="col gap2">
+      <div class="row"><span class="codepill">Model</span><input class="input mono grow" value="auto" readonly>
+        <button class="tiny" data-act="copy" data-text="auto" title="Copy">${ms('content_copy', 18)}</button></div>
+      <div class="row"><span class="codepill">Base URL</span><input class="input mono grow" value="${esc(origin + '/v1')}" readonly>
+        <button class="tiny" data-act="copy" data-text="${esc(origin + '/v1')}" title="Copy">${ms('content_copy', 18)}</button></div>
+    </div>
+    <p class="sm medium mt4 mb2">How to connect</p>
+    <ol class="sm muted" style="margin:0 0 8px 18px;line-height:1.7">
+      <li>In your app pick an <b>OpenAI-compatible</b> provider and set the base URL above.</li>
+      <li>Paste an API key from <b>API Keys</b> below (needed from other machines).</li>
+      <li>Set the model to <code>auto</code>. Claude Code: <code>ANTHROPIC_BASE_URL=${esc(origin)}</code> and <code>ANTHROPIC_MODEL=auto</code>.</li>
+      <li>Optional: send <code>"models": ["groq/…", "ds/…"]</code> in the request to choose the order for that call.</li>
+    </ol>
+    <div class="row"><textarea class="input mono grow" rows="3" readonly>${esc(example)}</textarea>
+      <button class="tiny" data-act="copy" data-text="${esc(example)}" title="Copy">${ms('content_copy', 18)}</button></div>
+    <p class="sm medium mt4 mb2">Order right now <span class="xs muted">(${a.source === 'autoModels' ? 'your list' : 'every model of providers with an active account'}, at most ${a.maxAttempts} tried per request)</span></p>
+    ${a.candidates.length ? `<div class="col">${rows}</div>${a.candidates.length > 12 ? `<p class="xs muted mt1">…and ${a.candidates.length - 12} more</p>` : ''}`
+      : `<div class="warn-box">${ms('warning', 16)}<p class="grow">No candidates: add a provider account first, or list models under Configure.</p><a class="linkbtn" href="#/providers">Providers</a></div>`}
+  </div>`;
+};
+actions.editAuto = async () => {
+  const a = await get('/auto');
+  openModal({
+    title: 'Auto model',
+    body: field('models', 'Models to try, in order (one per line)', {type: 'textarea', rows: 6, value: a.autoModels.join('\n'),
+        placeholder: 'groq/llama-3.3-70b-versatile\nds/deepseek-chat', hint: 'Leave empty to use every model of every provider with an active account.'})
+      + field('max', 'Max models tried per request', {type: 'number', min: 1, value: a.maxAttempts})
+      + twoButtons('Save'),
+    onSubmit: async (f) => {
+      const models = f.models.value.split('\n').map((s) => s.trim()).filter(Boolean);
+      const max = Math.max(1, parseInt(f.max.value, 10) || 5);
+      await patch('/settings', {autoModels: models, autoMaxAttempts: max});
+      notify('success', 'Auto model saved');
+      reload();
+    },
+  });
 };
 const securityWarning = (msg, href, label) => `<div class="warn-box">${ms('warning', 16)}<p class="grow">${esc(msg)}</p>${href ? `<a class="linkbtn" href="${href}">${esc(label)}</a>` : ''}</div>`;
 

@@ -726,7 +726,7 @@ fn build_output(input: &str) -> String {
 }
 
 fn is_summary_line(low: &str) -> bool {
-    let num_then = |s: &str| -> Option<&str> {
+    fn num_then(s: &str) -> Option<&str> {
         let d = s.bytes().take_while(u8::is_ascii_digit).count();
         if d == 0 {
             return None;
@@ -734,7 +734,7 @@ fn is_summary_line(low: &str) -> bool {
         let r = &s[d..];
         let r2 = r.trim_start();
         (r2.len() < r.len()).then_some(r2)
-    };
+    }
     for verb in ["added", "removed", "changed", "audited", "installed"] {
         if let Some(r) = low.strip_prefix(verb) {
             let r2 = r.trim_start();

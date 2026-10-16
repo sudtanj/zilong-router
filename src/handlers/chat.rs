@@ -4,7 +4,6 @@
 
 use std::collections::HashSet;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -130,7 +129,6 @@ async fn handle_inner(
         }
         _ => Vec::new(),
     };
-    let sends = AtomicUsize::new(0);
     let req = Req {
         caller: &caller,
         headers: &headers,
@@ -140,7 +138,6 @@ async fn handle_inner(
         endpoint: &endpoint,
         started,
         body_len,
-        sends: &sends,
     };
 
     if !auto {
@@ -148,7 +145,7 @@ async fn handle_inner(
         return attempt(&state, &req, &resolved, &raw_model).await;
     }
 
-    // `auto`: walk the candidates until one answers. Upstream errors only surface
+    // `auto`: walk every candidate until one answers. Upstream errors only surface
     // before the first byte is sent, so moving on to the next model is always safe.
     let settings = state.db.settings();
     let explicit: Vec<String> = if requested.is_empty() {
@@ -162,12 +159,10 @@ async fn handle_inner(
     } else {
         requested
     };
-    let max = settings.get("autoMaxAttempts").and_then(Value::as_u64).unwrap_or(5).max(1) as usize;
     let candidates = crate::discovery::auto_candidates(&state, &aliases, &connections, &explicit).await;
 
     let mut last: Option<ApiError> = None;
     let mut failures: Vec<String> = Vec::new();
-    let (mut sent, mut tried_models) = (0usize, 0usize);
     for c in candidates {
         let Some(p) = state.registry.get(&c.provider) else { continue };
         let usable = caller.may_use(&p.id, &c.model)
@@ -195,20 +190,18 @@ async fn handle_inner(
                     e.message.chars().take(160).collect::<String>()
                 ));
                 last = Some(e);
-                // Models whose accounts are all missing or cooling down cost no upstream
-                // call; only models that were actually tried count against the budget.
-                if req.sends.load(Ordering::Relaxed) > sent {
-                    sent = req.sends.load(Ordering::Relaxed);
-                    tried_models += 1;
-                }
-                if tried_models >= max {
-                    break;
-                }
             }
         }
     }
     Err(match last {
-        Some(e) => ApiError { message: format!("auto: no model succeeded. Tried: {}", failures.join(" | ")), ..e },
+        Some(e) => {
+            // Every candidate failed; keep the message readable when there were many.
+            let skipped = failures.len().saturating_sub(10);
+            let more = if skipped > 0 { format!("{skipped} earlier failures, then ") } else { String::new() };
+            let message =
+                format!("auto: all {} models failed. {more}{}", failures.len(), failures[skipped..].join(" | "));
+            ApiError { message, ..e }
+        }
         None => ApiError::new(
             404,
             source,
@@ -227,8 +220,6 @@ struct Req<'a> {
     endpoint: &'a str,
     started: Instant,
     body_len: usize,
-    /// Upstream calls made so far (across `auto` candidates).
-    sends: &'a AtomicUsize,
 }
 
 async fn attempt(
@@ -311,7 +302,6 @@ async fn attempt(
             }
         };
         tried += 1;
-        req.sends.fetch_add(1, Ordering::Relaxed);
         let level = conn.data.get("backoffLevel").and_then(Value::as_i64).unwrap_or(0);
 
         match executor::send(

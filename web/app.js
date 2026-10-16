@@ -287,7 +287,7 @@ const autoCard = (a, origin) => {
     </ol>
     <div class="row"><textarea class="input mono grow" rows="3" readonly>${esc(example)}</textarea>
       <button class="tiny" data-act="copy" data-text="${esc(example)}" title="Copy">${ms('content_copy', 18)}</button></div>
-    <p class="sm medium mt4 mb2">Order right now <span class="xs muted">(${a.source === 'autoModels' ? 'your list' : 'every model of every provider with an active account; endpoints without a catalogue are asked for their model list'}, at most ${a.maxAttempts} tried per request)</span></p>
+    <p class="sm medium mt4 mb2">Order right now <span class="xs muted">(${a.source === 'autoModels' ? 'your list' : 'every model of every provider with an active account; endpoints without a catalogue are asked for their model list'}; tried in this order until one answers)</span></p>
     ${a.candidates.length ? `<div class="col">${rows}</div>${a.candidates.length > 12 ? `<p class="xs muted mt1">…and ${a.candidates.length - 12} more</p>` : ''}`
       : `<div class="warn-box">${ms('warning', 16)}<p class="grow">No candidates. Add a provider account, or check that your endpoint answers <code>GET /models</code> (otherwise add its models on the provider page).</p><a class="linkbtn" href="#/providers">Providers</a></div>`}
   </div>`;
@@ -298,12 +298,10 @@ actions.editAuto = async () => {
     title: 'Auto model',
     body: field('models', 'Models to try, in order (one per line)', {type: 'textarea', rows: 6, value: a.autoModels.join('\n'),
         placeholder: 'groq/llama-3.3-70b-versatile\nds/deepseek-chat', hint: 'Leave empty to use every model of every provider with an active account (compatible endpoints are asked for their model list).'})
-      + field('max', 'Max models tried per request', {type: 'number', min: 1, value: a.maxAttempts})
       + twoButtons('Save'),
     onSubmit: async (f) => {
       const models = f.models.value.split('\n').map((s) => s.trim()).filter(Boolean);
-      const max = Math.max(1, parseInt(f.max.value, 10) || 5);
-      await patch('/settings', {autoModels: models, autoMaxAttempts: max});
+      await patch('/settings', {autoModels: models});
       notify('success', 'Auto model saved');
       reload();
     },

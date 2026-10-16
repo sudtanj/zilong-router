@@ -71,7 +71,8 @@ Candidates come from, in order of preference:
    compatible nodes) the list from their `GET /models`, cached for 30 minutes. Each
    provider's first model (providers by account priority) goes first, then their second, and so on.
 
-At most `settings.autoMaxAttempts` (default 5) models are actually sent the request.
+Candidates are tried one after another until one answers; a failure (error, rate
+limit, no free account) just moves on to the next model, until none are left.
 
 Requests from the Pi itself need no key. Requests from the LAN need one, and you can
 force keys everywhere with `mini-router settings requireApiKey=true`.

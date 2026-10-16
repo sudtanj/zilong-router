@@ -409,7 +409,6 @@ pub async fn auto_preview(State(state): S) -> R {
         .flatten()
         .filter_map(|m| m.as_str().map(str::to_string))
         .collect();
-    let max = settings.get("autoMaxAttempts").and_then(Value::as_u64).unwrap_or(5).max(1);
     let aliases = state.db.kv_scope("modelAliases")?;
     let conns = state.db.all_connections()?;
     let now = OffsetDateTime::now_utc();
@@ -451,7 +450,6 @@ pub async fn auto_preview(State(state): S) -> R {
     Ok(Json(json!({
         "source": if explicit.is_empty() { "accounts" } else { "autoModels" },
         "autoModels": explicit,
-        "maxAttempts": max,
         "candidates": candidates,
     })))
 }

@@ -413,7 +413,8 @@ pub async fn auto_preview(State(state): S) -> R {
     let aliases = state.db.kv_scope("modelAliases")?;
     let conns = state.db.all_connections()?;
     let now = OffsetDateTime::now_utc();
-    let candidates: Vec<Value> = crate::model::auto_candidates(&state.registry, &aliases, &conns, &explicit)
+    let candidates: Vec<Value> = crate::discovery::auto_candidates(&state, &aliases, &conns, &explicit)
+        .await
         .into_iter()
         .take(60)
         .map(|c| {
@@ -422,14 +423,25 @@ pub async fn auto_preview(State(state): S) -> R {
                 .and_then(|p| p.transport_for(crate::providers::Format::Openai, &c.model))
                 .map(|t| t.format.supported())
                 .unwrap_or(false);
-            let accounts: Vec<&ProviderConnection> =
-                conns.iter().filter(|a| a.provider == c.provider && a.is_active).collect();
+            let accounts: Vec<&ProviderConnection> = conns
+                .iter()
+                .filter(|a| a.provider == c.provider && a.is_active)
+                .filter(|a| c.pinned_connection.as_deref().map_or(true, |id| a.id == id))
+                .collect();
+            let node = c.pinned_connection.as_ref().and_then(|_| accounts.first().copied());
+            let prefix = node
+                .and_then(crate::model::connection_prefix)
+                .or(p.map(|p| p.alias.as_str()))
+                .unwrap_or(&c.provider)
+                .to_string();
+            let provider_name =
+                node.map(|n| n.label()).unwrap_or_else(|| p.map(|p| p.name()).unwrap_or(&c.provider).to_string());
             let no_auth = p.map(|p| p.no_auth).unwrap_or(false);
             let free = accounts.iter().any(|a| crate::router::active_lock_until(a, &c.model, now).is_none());
             json!({
-                "model": format!("{}/{}", p.map(|p| p.alias.as_str()).unwrap_or(&c.provider), c.model),
+                "model": format!("{prefix}/{}", c.model),
                 "provider": c.provider,
-                "providerName": p.map(|p| p.name()).unwrap_or(&c.provider),
+                "providerName": provider_name,
                 "accounts": accounts.len(),
                 "supported": supported,
                 "ready": supported && (no_auth || free),

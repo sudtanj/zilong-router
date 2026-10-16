@@ -9,6 +9,7 @@ mod cli;
 mod config;
 mod dashboard;
 mod db;
+mod discovery;
 mod executor;
 mod handlers;
 mod icons;

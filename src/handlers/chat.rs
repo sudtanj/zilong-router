@@ -163,7 +163,7 @@ async fn handle_inner(
         requested
     };
     let max = settings.get("autoMaxAttempts").and_then(Value::as_u64).unwrap_or(5).max(1) as usize;
-    let candidates = crate::model::auto_candidates(&state.registry, &aliases, &connections, &explicit);
+    let candidates = crate::discovery::auto_candidates(&state, &aliases, &connections, &explicit).await;
 
     let mut last: Option<ApiError> = None;
     let mut failures: Vec<String> = Vec::new();

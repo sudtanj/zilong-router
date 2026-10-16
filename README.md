@@ -66,8 +66,10 @@ Candidates come from, in order of preference:
 1. the request's `models` array (OpenRouter's fallback-list field), e.g.
    `{"model": "auto", "models": ["groq/llama-3.3-70b-versatile", "ds/deepseek-chat"]}`;
 2. `settings.autoModels`, e.g. `mini-router settings 'autoModels=["groq/llama-3.3-70b-versatile","ds/deepseek-chat"]'`;
-3. otherwise every catalogue model of every provider with an active account: each
-   provider's first model (providers by account priority), then their second, and so on.
+3. otherwise every model of every provider with an active account: catalogue models,
+   models added on the provider page, and for endpoints with neither (OpenAI/Anthropic
+   compatible nodes) the list from their `GET /models`, cached for 30 minutes. Each
+   provider's first model (providers by account priority) goes first, then their second, and so on.
 
 At most `settings.autoMaxAttempts` (default 5) models are actually sent the request.
 

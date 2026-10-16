@@ -24,6 +24,8 @@ pub struct AppState {
     /// Per-provider round-robin cursor (upstream keeps this in the DB; memory is fine
     /// for a single process and avoids two writes per request).
     pub rr: Mutex<HashMap<String, RoundRobin>>,
+    /// Live `/models` lists for accounts without a catalogue (see `discovery`).
+    pub model_cache: crate::discovery::Cache,
     pub started_at: Instant,
 }
 
@@ -62,6 +64,7 @@ impl AppState {
             machine_id,
             session_secret,
             rr: Mutex::new(HashMap::new()),
+            model_cache: Mutex::new(HashMap::new()),
             started_at: Instant::now(),
         })
     }

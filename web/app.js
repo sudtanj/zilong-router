@@ -190,8 +190,25 @@ document.addEventListener('click', async (ev) => {
 });
 actions.toggleTheme = () => { theme.flip(); $('#menu').classList.add('hidden'); };
 actions.logout = () => { $('#menu').classList.add('hidden'); return logout(); };
+// navigator.clipboard only exists in secure contexts (https or localhost); over plain
+// http on the LAN fall back to a hidden textarea + execCommand('copy').
+const copyText = async (text) => {
+  if (navigator.clipboard && window.isSecureContext) {
+    try { await navigator.clipboard.writeText(text); return; } catch { /* fall through */ }
+  }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none';
+  document.body.appendChild(ta);
+  ta.select();
+  ta.setSelectionRange(0, text.length);
+  const ok = document.execCommand('copy');
+  ta.remove();
+  if (!ok) { window.prompt('Copy this value:', text); }
+};
 actions.copy = async ({text}, b) => {
-  await navigator.clipboard.writeText(text);
+  await copyText(text);
   const icon = $('.ms', b); if (icon) { const old = icon.textContent; icon.textContent = 'check'; setTimeout(() => (icon.textContent = old), 2000); }
   const lbl = $('.lbl', b); if (lbl) { const old = lbl.textContent; lbl.textContent = 'Copied!'; setTimeout(() => (lbl.textContent = old), 2000); }
 };

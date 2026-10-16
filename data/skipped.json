@@ -206,11 +206,6 @@
    "reason": "no LLM transport (media-only provider)"
   },
   {
-   "id": "opencode",
-   "name": "OpenCode Free",
-   "reason": "needs a dedicated executor"
-  },
-  {
    "id": "opencode-go",
    "name": "OpenCode Go",
    "reason": "needs a dedicated executor"

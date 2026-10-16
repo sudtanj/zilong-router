@@ -3539,6 +3539,63 @@
    }
   },
   {
+   "id": "opencode",
+   "alias": "oc",
+   "aliases": [],
+   "category": "free",
+   "authType": "apikey",
+   "authModes": null,
+   "noAuth": true,
+   "priority": 40,
+   "display": {
+    "name": "OpenCode Free",
+    "color": "#E87040",
+    "textIcon": "OC",
+    "icon": "terminal",
+    "apiKeyUrl": null,
+    "deprecated": false,
+    "deprecationNotice": null
+   },
+   "transport": {
+    "baseUrl": "https://opencode.ai",
+    "headers": {
+     "x-opencode-client": "desktop"
+    },
+    "forceStream": true,
+    "noAuth": true,
+    "reasoningInject": {
+     "scope": "all"
+    },
+    "quirks": {
+     "forceAutoToolChoiceModels": [
+      "muse-spark-1.3-contributor-free"
+     ]
+    },
+    "format": "openai"
+   },
+   "transports": null,
+   "oauth": null,
+   "models": [
+    {
+     "id": "muse-spark-1.2-contributor-free",
+     "name": "Muse Spark 1.2 Contributor Free",
+     "targetFormat": "openai-responses"
+    },
+    {
+     "id": "muse-spark-1.3-contributor-free",
+     "name": "Muse Spark 1.3 Contributor Free",
+     "targetFormat": "openai-responses"
+    },
+    {
+     "id": "union-alpha",
+     "name": "Union Alpha Free",
+     "targetFormat": "claude"
+    }
+   ],
+   "passthroughModels": true,
+   "thinkingConfig": null
+  },
+  {
    "id": "openrouter",
    "alias": "openrouter",
    "aliases": [],

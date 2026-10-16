@@ -119,14 +119,18 @@ fn apply_auth(
 }
 
 /// Headers for the upstream call. Static transport headers, auth, the client's
-/// `anthropic-beta` merged for Claude-format upstreams, user overrides from
+/// `anthropic-beta` merged for Claude-format upstreams,
+/// provider quirks (`oauth::hooks::headers`), user overrides from
 /// `settings.providerOverrides[provider].headers`, and `Accept` for streams.
+#[allow(clippy::too_many_arguments)]
 pub fn build_headers(
     state: &AppState,
     provider: &Provider,
     transport: &Transport,
     conn: &ProviderConnection,
     client: &HeaderMap,
+    model: &str,
+    body: &Value,
     stream: bool,
 ) -> HashMap<String, String> {
     let mut h: HashMap<String, String> = HashMap::new();
@@ -157,6 +161,7 @@ pub fn build_headers(
             h.insert(key, set.join(","));
         }
     }
+    crate::oauth::hooks::headers(provider, conn, model, body, &mut h);
     if let Some(Value::Object(over)) =
         state.db.settings().pointer(&format!("/providerOverrides/{}/headers", provider.id))
     {
@@ -199,7 +204,7 @@ pub async fn send(
     stream: bool,
 ) -> Result<reqwest::Response, ExecError> {
     let url = build_url(provider, transport, conn, model, stream);
-    let headers = build_headers(state, provider, transport, conn, client_headers, stream);
+    let headers = build_headers(state, provider, transport, conn, client_headers, model, body, stream);
     let mut hm = reqwest::header::HeaderMap::new();
     for (k, v) in &headers {
         if let (Ok(n), Ok(val)) = (HeaderName::from_bytes(k.as_bytes()), HeaderValue::from_str(v)) {

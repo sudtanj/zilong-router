@@ -14,6 +14,7 @@ mod executor;
 mod handlers;
 mod icons;
 mod model;
+mod oauth;
 mod pricing;
 mod providers;
 mod router;

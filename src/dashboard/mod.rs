@@ -168,6 +168,9 @@ pub fn routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/connections", get(api::connections).post(api::add_connection))
         .route("/connections/:id", patch(api::patch_connection).delete(api::delete_connection))
         .route("/connections/:id/unlock", post(api::unlock_connection))
+        .route("/oauth/:provider/start", post(api::oauth_start))
+        .route("/oauth/:provider/exchange", post(api::oauth_exchange))
+        .route("/oauth/:provider/poll", post(api::oauth_poll))
         .route("/keys", get(api::keys).post(api::create_key))
         .route("/keys/:id", patch(api::patch_key).delete(api::delete_key))
         .route("/aliases", get(api::aliases).post(api::set_alias))
@@ -193,6 +196,7 @@ pub fn routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/assets/app.js", get(app_js))
         .route("/assets/style.css", get(style_css))
         .route("/api/info", get(info))
+        .route("/callback", get(oauth_callback))
         .route("/providers/:file", get(provider_icon))
         .nest("/api/admin", admin)
 }
@@ -261,4 +265,20 @@ async fn provider_icon(axum::extract::Path(file): axum::extract::Path<String>) -
             .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()),
         None => StatusCode::NOT_FOUND.into_response(),
     }
+}
+
+/// Where OAuth redirects land when the browser runs on this machine (or through a
+/// tunnel): hand the URL to the dashboard tab that started the sign-in.
+async fn oauth_callback() -> Response {
+    static_response(
+        "text/html; charset=utf-8",
+        r#"<!doctype html><meta charset="utf-8"><title>mini-router sign-in</title>
+<body style="font:15px system-ui;margin:40px;max-width:640px">
+<h3>Sign-in finished</h3><p id="m">Sending the result back to the dashboard…</p>
+<script>
+try { new BroadcastChannel('mini-router-oauth').postMessage(location.href); } catch (e) {}
+try { localStorage.setItem('mini-router-oauth', JSON.stringify({url: location.href, at: Date.now()})); } catch (e) {}
+document.getElementById('m').textContent = 'You can close this tab. If the dashboard does not continue, paste this address into it: ' + location.href;
+</script>"#,
+    )
 }

@@ -131,7 +131,9 @@ fn connection_json(c: &ProviderConnection, registry: &Registry, now: OffsetDateT
         "email": c.email,
         "priority": c.priority,
         "isActive": c.is_active,
+        "authType": c.auth_type,
         "keyMasked": c.secret().map(crate::usage::mask_key),
+        "expiresAt": c.data.get("expiresAt"),
         "baseUrl": c.base_url_override(),
         "prefix": c.data.pointer("/providerSpecificData/prefix").and_then(Value::as_str),
         "testStatus": c.data.get("testStatus"),
@@ -169,6 +171,8 @@ pub async fn providers(State(state): S) -> R {
                 "format": format,
                 "custom": p.id.ends_with("-compatible"),
                 "noAuth": p.no_auth,
+                "oauth": crate::oauth::flow(&p.id).map(|f| if f == crate::oauth::Flow::Redirect { "redirect" } else { "device" }),
+                "acceptsApiKey": !p.no_auth && p.accepts_api_key(),
                 "passthroughModels": p.passthrough_models,
                 "priority": p.priority,
                 "color": d.color,
@@ -600,4 +604,34 @@ pub async fn usage(State(state): S, Query(q): Query<UsageQuery>) -> R {
 
 pub async fn usage_recent(State(state): S, Query(q): Query<UsageQuery>) -> R {
     Ok(Json(Value::Array(state.db.usage_recent(q.limit.unwrap_or(50).clamp(1, 500))?)))
+}
+
+// ----- OAuth sign-in -----------------------------------------------------------------
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct OauthStart {
+    redirect_uri: Option<String>,
+}
+
+/// Begin a sign-in; see `crate::oauth::start` for the reply shapes.
+pub async fn oauth_start(State(state): S, Path(provider): Path<String>, body: Option<Json<OauthStart>>) -> R {
+    let b = body.map(|Json(b)| b).unwrap_or_default();
+    crate::oauth::start(&state, &provider, b.redirect_uri.as_deref()).await.map(Json).map_err(|e| bad(e.to_string()))
+}
+
+#[derive(Deserialize)]
+pub struct OauthStep {
+    session: String,
+    /// Redirect flows: the callback URL (or code) the user pasted.
+    #[serde(default)]
+    callback: String,
+}
+
+pub async fn oauth_exchange(State(state): S, Path(provider): Path<String>, Json(b): Json<OauthStep>) -> R {
+    crate::oauth::exchange(&state, &provider, &b.session, &b.callback).await.map(Json).map_err(|e| bad(e.to_string()))
+}
+
+pub async fn oauth_poll(State(state): S, Path(provider): Path<String>, Json(b): Json<OauthStep>) -> R {
+    crate::oauth::poll(&state, &provider, &b.session).await.map(Json).map_err(|e| bad(e.to_string()))
 }

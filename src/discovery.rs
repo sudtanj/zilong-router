@@ -70,7 +70,7 @@ async fn fetch(state: &AppState, conn: &ProviderConnection) -> anyhow::Result<Ve
     }
     let url = format!("{}/models", api_root(conn.base_url_override().unwrap_or(&t.base_url)));
     let mut rb = state.http.get(&url).timeout(TIMEOUT);
-    for (k, v) in crate::executor::build_headers(state, p, t, conn, &HeaderMap::new(), false) {
+    for (k, v) in crate::executor::build_headers(state, p, t, conn, &HeaderMap::new(), "", &Value::Null, false) {
         if !k.eq_ignore_ascii_case("content-type") {
             rb = rb.header(k, v);
         }

@@ -77,6 +77,33 @@ limit, no free account) just moves on to the next model, until none are left.
 Requests from the Pi itself need no key. Requests from the LAN need one, and you can
 force keys everywhere with `mini-router settings requireApiKey=true`.
 
+## Sign-in (OAuth) and free providers
+
+Some providers have no API key: you sign in with your account instead. Open the provider
+in **Providers** and press **Sign in with …**. Tokens are stored on the account and
+refreshed automatically before they expire (and once more after a 401).
+
+| Provider | How you sign in |
+|---|---|
+| Claude Code (`claude`) | Open the sign-in page, log in, then paste the address you land on (`http://localhost:…/callback?code=…`) back into the dashboard. The page itself may not load, that's expected. |
+| xAI (`xai`), Cline, Cline Pass | Same: paste the callback address. xAI always lands on `http://127.0.0.1:56121/callback`. |
+| GitHub Copilot, Kimi, Kilo Code, MiniMax Code (CN / global), Nous, Muse | Device code: the dashboard shows a code, you enter it on the provider's page, the dashboard notices when you approve. |
+
+Behind the scenes, as upstream does: Claude sign-ins send Claude Code's identity (system
+prompt, billing header, `metadata.user_id`) and rename tools so they don't clash with
+Claude Code's own, restoring the names in the reply. GitHub accounts trade the GitHub token
+for a Copilot token and send Claude models to Copilot's `/v1/messages`. Kimi, Cline,
+MiniMax, Muse and Kilo get their client headers.
+
+Free providers need no account: **MiMo Free** (`mimo-free`, `mmf`) fetches a free-tier
+token by itself. Local Ollama is best added as an OpenAI-compatible endpoint
+(`http://<host>:11434/v1`).
+
+Not ported, because they need a proprietary protocol or impersonate an IDE (see
+`data/skipped.json`): Cursor, Windsurf, Kiro, Qoder, Trae, Zed, Codex (Responses API),
+Gemini CLI / Antigravity (Gemini format), Devin CLI, OpenCode, iFlow, CodeBuddy, Kimchi,
+GitLab Duo.
+
 ## Token Saver
 
 Same feature and settings keys as 9router's Token Saver page, minus context
@@ -154,12 +181,13 @@ upstream, runs `tools/sync-upstream/convert.mjs`, which imports upstream's own r
 builders and writes:
 
 - `data/providers.json`: providers the router can drive (OpenAI or Anthropic wire format,
-  API-key auth), with base URLs, headers, aliases and model lists;
+  API-key auth, plus the sign-in and free providers described above),
+  with base URLs, headers, aliases and model lists;
 - `data/pricing.json`: the pricing tables;
 - `data/skipped.json`: providers left out and why (dedicated executor, OAuth-only, other
   wire format).
 
-If anything changed, the job runs the tests and opens a pull request. The binary embeds
+If anything changed and the tests pass, the job commits the new files to `main`. The binary embeds
 these files; dropping a newer `providers.json` or `pricing.json` into `DATA_DIR` overrides
 the embedded copy without a rebuild.
 

@@ -114,6 +114,9 @@ pub struct Provider {
     pub category: String,
     #[serde(default)]
     pub auth_type: String,
+    /// Ways to sign in, e.g. ["oauth", "apikey"] for providers that take both.
+    #[serde(default)]
+    pub auth_modes: Option<Vec<String>>,
     #[serde(default)]
     pub no_auth: bool,
     #[serde(default = "default_priority")]
@@ -142,6 +145,9 @@ impl Provider {
     /// same-format endpoint from `transports`, then the model's declared format,
     /// then the default transport.
     pub fn transport_for(&self, source: Format, model: &str) -> Option<&Transport> {
+        if let Some(t) = crate::oauth::hooks::transport_for(self, model) {
+            return Some(t);
+        }
         if let Some(list) = &self.transports {
             if let Some(t) = list.iter().find(|t| t.format == source && t.format.supported()) {
                 return Some(t);
@@ -167,6 +173,15 @@ impl Provider {
     /// deepseek-v4-pro-max -> deepseek-v4-pro).
     pub fn upstream_model_id<'a>(&'a self, id: &'a str) -> &'a str {
         self.model(id).and_then(|m| m.upstream_model_id.as_deref()).unwrap_or(id)
+    }
+
+    /// Whether an account can be added with a plain API key (OAuth-only providers
+    /// such as Claude Code or GitHub Copilot cannot).
+    pub fn accepts_api_key(&self) -> bool {
+        match &self.auth_modes {
+            Some(modes) if !modes.is_empty() => modes.iter().any(|m| m == "apikey"),
+            _ => self.auth_type != "oauth",
+        }
     }
 
     pub fn is_valid_model(&self, id: &str) -> bool {
@@ -218,6 +233,7 @@ impl Registry {
         }
         let file: File = serde_json::from_str(&text)?;
         let mut providers = file.providers;
+        crate::oauth::hooks::patch_registry(&mut providers);
         providers.push(synthetic(OPENAI_COMPATIBLE, "OpenAI Compatible", Format::Openai));
         providers.push(synthetic(ANTHROPIC_COMPATIBLE, "Anthropic Compatible", Format::Claude));
 
@@ -257,6 +273,7 @@ fn synthetic(id: &str, name: &str, format: Format) -> Provider {
         aliases: vec![],
         category: "custom".into(),
         auth_type: "apikey".into(),
+        auth_modes: None,
         no_auth: false,
         priority: 500,
         display: Some(Display { name: name.into(), ..Default::default() }),

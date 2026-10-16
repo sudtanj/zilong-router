@@ -114,6 +114,10 @@ pub fn pick(
     let now = OffsetDateTime::now_utc();
     let prov = state.registry.get(provider);
     if prov.map(|p| p.no_auth).unwrap_or(false) {
+        // One virtual account: once it failed there is nothing else to try.
+        if exclude.contains("noauth") {
+            return Ok(Pick::None);
+        }
         return Ok(Pick::Connection(virtual_connection(provider)));
     }
     let all = state.db.connections_for(provider, true)?;

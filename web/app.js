@@ -519,8 +519,9 @@ pages.providers = async (parts) => {
     }).filter((x) => match(x.name) && filt(x.s));
     const regular = provs.filter((p) => !isCustomId(p.id)).map((p) => ({p, s: statsFor(conns.filter((c) => c.provider === p.id))}))
       .filter((x) => match(x.p.name) && filt(x.s, x.p.noAuth));
-    const free = regular.filter((x) => x.p.noAuth || /free/.test(x.p.category || ''));
-    const apikey = regular.filter((x) => !free.includes(x)).sort((a, b) => (a.s.total > 0 ? 0 : 1) - (b.s.total > 0 ? 0 : 1) || a.p.name.localeCompare(b.p.name));
+    const oauth = regular.filter((x) => x.p.oauth);
+    const free = regular.filter((x) => !oauth.includes(x) && (x.p.noAuth || /free/.test(x.p.category || '')));
+    const apikey = regular.filter((x) => !free.includes(x) && !oauth.includes(x)).sort((a, b) => (a.s.total > 0 ? 0 : 1) - (b.s.total > 0 ? 0 : 1) || a.p.name.localeCompare(b.p.name));
     const searching = !!provSearch || provFilter !== 'all';
     const visible = searching || showAllApikey ? apikey : apikey.slice(0, 20);
     const section = (title, items, right) => `<div class="col gap4"><div class="row between wrap gap3"><h2 class="sect-title">${title}</h2>${right || ''}</div>${items}</div>`;
@@ -530,6 +531,7 @@ pages.providers = async (parts) => {
       ${section('Custom Providers (OpenAI/Anthropic Compatible)',
         custom.length ? `<div class="pgrid">${custom.map((x) => x.card).join('')}</div>` : `<div class="dashed">${ms('extension', 18)}<span>No custom providers — use buttons above to add OpenAI/Anthropic compatible endpoints</span></div>`,
         `<div class="row gap2 wrap"><button class="btn sm primary" data-act="addCompatible" data-variant="anthropic-compatible">${ms('add')}Add Anthropic Compatible</button><button class="btn sm white" data-act="addCompatible" data-variant="openai-compatible">${ms('add')}Add OpenAI Compatible</button></div>`)}
+      ${oauth.length ? section('OAuth Providers', `<div class="pgrid">${oauth.map((x) => providerCard({...x.p, key: x.p.id}, x.s)).join('')}</div>`) : ''}
       ${free.length ? section('Free Tier Providers', `<div class="pgrid">${free.map((x) => providerCard({...x.p, key: x.p.id}, x.s)).join('')}</div>`) : ''}
       ${apikey.length ? section('API Key Providers', `<div class="pgrid">${visible.map((x) => providerCard({...x.p, key: x.p.id}, x.s)).join('')}</div>` +
         (!searching && !showAllApikey && apikey.length > 20 ? `<button class="showall" data-act="showAllApikey">${ms('expand_more', 16)}Show all ${apikey.length} providers</button>` : '')) : ''}`;
@@ -591,10 +593,10 @@ async function providerDetail(rawId) {
         <div class="arrows"><button data-act="moveConn" data-id="${c.id}" data-dir="-1" ${i === 0 ? 'disabled' : ''}>${ms('keyboard_arrow_up', 14)}</button><button data-act="moveConn" data-id="${c.id}" data-dir="1" ${i === list.length - 1 ? 'disabled' : ''}>${ms('keyboard_arrow_down', 14)}</button></div>
         ${ms('key', 16)}
         <div class="grow">
-          <p class="name truncate">${esc(c.name || c.email || 'API Key')}</p>
+          <p class="name truncate">${esc(c.name || c.email || (c.authType === 'oauth' ? 'Signed-in account' : 'API Key'))}</p>
           ${c.keyMasked ? `<p class="xs muted truncate mono">${esc(c.keyMasked)}${custom ? ' · ' + esc(c.baseUrl || '') : ''}</p>` : ''}
           <div class="tags">
-            ${badge(!c.isActive ? 'disabled' : st, variant, true)}${badge('API Key')}
+            ${badge(!c.isActive ? 'disabled' : st, variant, true)}${badge(c.authType === 'oauth' ? 'OAuth' : 'API Key')}${c.authType === 'oauth' && c.expiresAt ? `<span class="xs muted" title="Refreshed automatically">token until ${esc(new Date(c.expiresAt).toLocaleString())}</span>` : ''}
             ${cooling && until ? `<span class="cool" data-cool="${esc(until)}">⏱ ${cooldownText(until)}</span>` : ''}
             ${c.lastError && c.isActive ? `<span class="lasterr truncate" title="${esc(c.lastError)}">${esc(c.lastError)}</span>` : ''}
             <span class="xs muted">#${c.priority ?? i + 1}</span>
@@ -617,7 +619,9 @@ async function providerDetail(rawId) {
       <div class="ops"><button class="tiny" data-act="copy" data-text="${esc(prefix)}/${esc(id)}" title="Copy">${ms('content_copy', 14)}</button>
       ${isCustom ? `<button class="tiny danger" data-act="delCustomModel" data-prefix="${esc(prefix)}" data-model="${esc(id)}" title="Remove custom model">${ms('close', 14)}</button>` : ''}</div>
     </div></div>`;
-  const addBtn = `<button class="btn sm primary" data-act="addConn" data-provider="${esc(prov.id)}" data-node="${custom ? node.id : ''}">${ms(custom ? 'key' : 'add')}${custom ? 'Add API Key' : 'Add Connection'}</button>`;
+  const keyBtn = `<button class="btn sm ${prov.oauth && !custom ? 'secondary' : 'primary'}" data-act="addConn" data-provider="${esc(prov.id)}" data-node="${custom ? node.id : ''}">${ms(custom ? 'key' : 'add')}${custom ? 'Add API Key' : prov.oauth ? 'Add API Key' : 'Add Connection'}</button>`;
+  const signInBtn = !custom && prov.oauth ? `<button class="btn sm primary" data-act="oauthLogin" data-provider="${esc(prov.id)}">${ms('login')}Sign in with ${esc(prov.name)}</button>` : '';
+  const addBtn = `<div class="row gap2 wrap">${signInBtn}${custom || !prov.oauth || prov.acceptsApiKey ? keyBtn : ''}</div>`;
 
   return `<div class="page">
     ${custom ? `<div class="card"><div class="row between start wrap gap3">
@@ -689,6 +693,64 @@ actions.addConn = ({provider, node}) => {
     },
   });
 };
+// OAuth sign-in (upstream OAuthModal): redirect flows paste the callback URL back,
+// device flows show a code and poll until the account approves it.
+actions.oauthLogin = async ({provider}) => {
+  const name = (provCache || []).find((p) => p.id === provider)?.name || provider;
+  const port = location.port || (location.protocol === 'https:' ? '443' : '80');
+  const s = await post('/oauth/' + encodeURIComponent(provider) + '/start', {redirectUri: `http://localhost:${port}/callback`});
+  const done = (c) => { invalidate(); notify('success', `${name}: signed in${c && (c.email || c.name) ? ' as ' + (c.email || c.name) : ''}`); reload(); };
+  if (s.flow === 'device') return oauthDevice(provider, name, s, done);
+  let channel = null;
+  const finish = async (callback) => {
+    const r = await post('/oauth/' + encodeURIComponent(provider) + '/exchange', {session: s.session, callback});
+    done(r);
+  };
+  const m = openModal({
+    title: 'Sign in with ' + name,
+    body: `<ol class="sm muted" style="margin:0 0 12px 18px;line-height:1.7">
+        <li>Open the sign-in page and log in.</li>
+        <li>You end up on <code>${esc(s.redirectUri.replace(/\?.*/, ''))}</code>. That page may not load (it points at your own computer, not this router): that's fine.</li>
+        <li>Copy the whole address from the browser's address bar and paste it below.</li></ol>
+      <a class="btn primary full mb4" href="${esc(s.authUrl)}" target="_blank" rel="noopener">${ms('open_in_new')}Open sign-in page</a>`
+      + field('callback', 'Callback URL or code', {type: 'textarea', rows: 3, placeholder: s.redirectUri + '?code=…&state=…', required: true})
+      + twoButtons('Connect'),
+    onSubmit: async (f) => { await finish(f.callback.value.trim()); },
+    onClose: () => { if (channel) channel.close(); },
+  });
+  // If the redirect does reach this router (browser on the same machine), finish by itself.
+  try {
+    channel = new BroadcastChannel('mini-router-oauth');
+    channel.onmessage = (e) => { const t = $('textarea[name=callback]', m.form); if (t && !t.value) { t.value = e.data; m.form.requestSubmit(); } };
+  } catch (_) {}
+};
+function oauthDevice(provider, name, s, done) {
+  let stop = false, wait = Math.max(1, s.interval || 5) * 1000;
+  const deadline = Date.now() + (s.expiresIn || 900) * 1000;
+  const link = s.verificationUriComplete || s.verificationUri;
+  const m = openModal({
+    title: 'Sign in with ' + name,
+    body: `<p class="sm muted mb4">Open the page below, sign in and enter this code to approve mini-router.</p>
+      <div class="row gap2 mb4"><input class="input mono grow" style="font-size:20px;text-align:center;letter-spacing:2px" value="${esc(s.userCode || '')}" readonly>
+        <button type="button" class="tiny" data-act="copy" data-text="${esc(s.userCode || '')}" title="Copy">${ms('content_copy', 18)}</button></div>
+      <a class="btn primary full mb4" href="${esc(link)}" target="_blank" rel="noopener">${ms('open_in_new')}Open ${esc(link.replace(/^https?:\/\//, '').replace(/[?#].*/, ''))}</a>
+      <p class="sm muted row gap2" id="oauth-status">${ms('hourglass_top', 16)}Waiting for approval…</p>`,
+    footer: '<button type="button" class="btn ghost full" data-close>Cancel</button>',
+    onClose: () => { stop = true; },
+  });
+  const status = (t) => { const el = $('#oauth-status'); if (el) el.textContent = t; };
+  const tick = async () => {
+    if (stop) return;
+    if (Date.now() > deadline) { status('The code expired. Close this and start again.'); return; }
+    try {
+      const r = await post('/oauth/' + encodeURIComponent(provider) + '/poll', {session: s.session});
+      if (r.status === 'done') { stop = true; m.close(); done(r.connection); return; }
+      if (r.status === 'slow_down') wait += 5000;
+    } catch (err) { status(err.message); return; }
+    setTimeout(tick, wait);
+  };
+  setTimeout(tick, wait);
+}
 actions.editConn = async ({id}) => {
   const c = (await connectionList()).find((x) => x.id === id); const custom = isCustomId(c.provider);
   openModal({

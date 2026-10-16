@@ -44,6 +44,9 @@ try {
   // Providers whose upstream code has a dedicated executor (open-sse/executors/*.js);
   // they need Rust work beyond config and are filtered out for now.
   const SPECIAL_EXECUTORS = new Set(["antigravity","azure","bedrock","bedrock-xai","codebuddy-cn","codebuddy-intl","codex","commandcode","cursor","devin-cli","gemini-cli","github","grok-cli","grok-web","iflow","kimchi","kiro","mimo-free","minimax-code","minimax-code-global","ollama-local","opencode","opencode-go","opencode-zen","perplexity-web","qoder","qoder-cn","trae","vertex","vertex-partner","windsurf","xiaomi-mimo","xiaomi-tokenplan","zed"]);
+  // Upstream-special providers mini-router implements natively (src/oauth): their
+  // sign-in, token refresh and request quirks are ported, so keep them.
+  const NATIVE = new Set(["claude", "cline", "clinepass", "github", "kilocode", "kimi", "mimo-free", "minimax-code", "minimax-code-global", "muse", "nous", "xai"]);
   const SUPPORTED_FORMATS = new Set(["openai", "claude"]);
   const skipped = [];
   const skip = (e, reason) => skipped.push({ id: e.id, name: e.display?.name || e.id, reason });
@@ -52,9 +55,9 @@ try {
   const providers = [];
   for (const e of REGISTRY) {
     if (!e.transport) { skip(e, "no LLM transport (media-only provider)"); continue; }
-    if (SPECIAL_EXECUTORS.has(e.id) || e.transport.executor) { skip(e, "needs a dedicated executor"); continue; }
+    if (!NATIVE.has(e.id) && (SPECIAL_EXECUTORS.has(e.id) || e.transport.executor)) { skip(e, "needs a dedicated executor"); continue; }
     if (!SUPPORTED_FORMATS.has(e.transport.format || "openai")) { skip(e, `wire format \"${e.transport.format}\" not implemented`); continue; }
-    if (!acceptsApiKey(e)) { skip(e, "OAuth-only login flow"); continue; }
+    if (!NATIVE.has(e.id) && !acceptsApiKey(e)) { skip(e, "OAuth-only login flow"); continue; }
     if (e.display?.deprecated) { skip(e, "marked deprecated upstream"); continue; }
     // Keep only what the Rust router needs; media/UI-only fields are dropped.
     const transport = e.transport ? { ...e.transport } : null;

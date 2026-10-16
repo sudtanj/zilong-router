@@ -266,55 +266,69 @@ async fn attempt(
     let mut exclude: HashSet<String> = HashSet::new();
     let mut last_err: Option<(u16, String)> = None;
     let mut tried = 0usize;
+    // An OAuth account that got a 401/403 is refreshed once and tried again.
+    let mut retry_with: Option<ProviderConnection> = None;
+    let mut refreshed: HashSet<String> = HashSet::new();
     loop {
-        let conn = match router::pick(
-            &state,
-            &provider.id,
-            &resolved.model,
-            &exclude,
-            resolved.pinned_connection.as_deref(),
-        )
-        .map_err(|e| ApiError::new(500, source, e.to_string()))?
-        {
-            Pick::Connection(c) => c,
-            Pick::AllLocked { retry_after_secs } => {
-                let msg = match &last_err {
-                    Some((_, m)) => format!(
-                        "[{}/{}] {m} (all accounts cooling down, retry in {retry_after_secs}s)",
-                        provider.id, resolved.model
-                    ),
-                    None => format!(
-                        "[{}/{}] all accounts are rate limited; retry in {retry_after_secs}s",
-                        provider.id, resolved.model
-                    ),
-                };
-                return Err(ApiError::new(503, source, msg).retry_after(retry_after_secs));
-            }
-            Pick::None => {
-                return Err(match last_err {
-                    Some((status, m)) => ApiError::new(if status >= 500 { 502 } else { status }, source, format!("[{}/{}] {m}", provider.id, resolved.model)),
-                    None if tried == 0 => ApiError::new(404, source, format!(
-                        "No active credentials for provider '{}'. Add one with: mini-router connection add {} <api-key>",
-                        provider.id, provider.id
-                    )),
-                    None => ApiError::new(503, source, "all accounts failed"),
-                });
-            }
+        let picked = match retry_with.take() {
+            Some(c) => c,
+            None => match router::pick(
+                &state,
+                &provider.id,
+                &resolved.model,
+                &exclude,
+                resolved.pinned_connection.as_deref(),
+            )
+            .map_err(|e| ApiError::new(500, source, e.to_string()))?
+            {
+                Pick::Connection(c) => c,
+                Pick::AllLocked { retry_after_secs } => {
+                    let msg = match &last_err {
+                        Some((_, m)) => format!(
+                            "[{}/{}] {m} (all accounts cooling down, retry in {retry_after_secs}s)",
+                            provider.id, resolved.model
+                        ),
+                        None => format!(
+                            "[{}/{}] all accounts are rate limited; retry in {retry_after_secs}s",
+                            provider.id, resolved.model
+                        ),
+                    };
+                    return Err(ApiError::new(503, source, msg).retry_after(retry_after_secs));
+                }
+                Pick::None => {
+                    return Err(match last_err {
+                        Some((status, m)) => ApiError::new(if status >= 500 { 502 } else { status }, source, format!("[{}/{}] {m}", provider.id, resolved.model)),
+                        None if tried == 0 => ApiError::new(404, source, format!(
+                            "No active credentials for provider '{}'. Add one with: mini-router connection add {} <api-key>",
+                            provider.id, provider.id
+                        )),
+                        None => ApiError::new(503, source, "all accounts failed"),
+                    });
+                }
+            },
         };
         tried += 1;
+        // Refresh tokens that are about to expire, mint per-request tokens (Copilot, MiMo).
+        let picked_id = picked.id.clone();
+        let conn = match crate::oauth::prepare(&state, picked).await {
+            Ok(c) => c,
+            Err(e) => {
+                let msg = format!("credentials could not be renewed ({e}); sign in again");
+                tracing::warn!("{}/{}: {msg}", provider.id, resolved.model);
+                exclude.insert(picked_id);
+                last_err = Some((401, msg));
+                continue;
+            }
+        };
         let level = conn.data.get("backoffLevel").and_then(Value::as_i64).unwrap_or(0);
+        let patched = crate::oauth::hooks::body(&provider.id, &conn, target, &upstream_model, &upstream_body);
+        let (send_body, decloak) = match &patched {
+            Some((b, d)) => (b, *d),
+            None => (&upstream_body, false),
+        };
 
-        match executor::send(
-            &state,
-            provider,
-            transport,
-            &conn,
-            &upstream_model,
-            &upstream_body,
-            &headers,
-            client_stream,
-        )
-        .await
+        match executor::send(&state, provider, transport, &conn, &upstream_model, send_body, &headers, client_stream)
+            .await
         {
             Ok(resp) => {
                 router::mark_success(&state, &conn, &resolved.model);
@@ -329,6 +343,7 @@ async fn attempt(
                     body_len,
                     source,
                     target,
+                    decloak,
                 };
                 return if client_stream && is_sse(&resp) {
                     Ok(stream_response(ctx, resp))
@@ -338,6 +353,19 @@ async fn attempt(
             }
             Err(e) => {
                 let (status, msg) = (e.status(), e.message());
+                if matches!(status, 401 | 403) && refreshed.insert(conn.id.clone()) {
+                    if let Some(fresh) = crate::oauth::force_refresh(&state, &conn).await {
+                        tracing::info!(
+                            "{}/{}: {status} via {}, retrying with renewed credentials",
+                            provider.id,
+                            resolved.model,
+                            conn.label()
+                        );
+                        retry_with = Some(fresh);
+                        tried -= 1;
+                        continue;
+                    }
+                }
                 let verdict = router::classify(status, &msg, level);
                 tracing::warn!(
                     "{}/{} via {} failed: {} {}",
@@ -386,6 +414,8 @@ struct ReqCtx {
     body_len: usize,
     source: Format,
     target: Format,
+    /// Claude OAuth tool names were cloaked; restore them in the response.
+    decloak: bool,
 }
 
 impl ReqCtx {
@@ -421,15 +451,19 @@ async fn json_response(ctx: ReqCtx, resp: reqwest::Response, client_stream: bool
     let text = resp.text().await.map_err(|e| ApiError::new(502, ctx.source, format!("reading upstream body: {e}")))?;
     let v: Value = if upstream_sse {
         // Upstream insisted on streaming; collapse it into one JSON document.
-        collapse_sse(&text, ctx.target, ctx.source, &ctx.model)
+        collapse_sse(&text, ctx.target, ctx.source, &ctx.model, ctx.decloak)
     } else {
-        let v: Value = serde_json::from_str(&text).map_err(|_| {
+        let mut v: Value = serde_json::from_str(&text).map_err(|_| {
             ApiError::new(
                 502,
                 ctx.source,
                 format!("upstream returned non-JSON: {}", text.chars().take(200).collect::<String>()),
             )
         })?;
+        crate::oauth::hooks::fix_response(&ctx.provider, &mut v);
+        if ctx.decloak {
+            crate::oauth::hooks::decloak_json(&mut v);
+        }
         translator::translate_response(ctx.target, ctx.source, &v, &ctx.model)
     };
     let tokens = usage::extract(&v).unwrap_or_default();
@@ -452,11 +486,14 @@ async fn json_response(ctx: ReqCtx, resp: reqwest::Response, client_stream: bool
 }
 
 /// Replay a full SSE body through the stream translator and assemble the final JSON.
-fn collapse_sse(text: &str, from: Format, to: Format, model: &str) -> Value {
+fn collapse_sse(text: &str, from: Format, to: Format, model: &str, decloak: bool) -> Value {
     let mut parser = sse::Parser::default();
     let mut tr = StreamTranslator::new(from, to, model);
     let mut events = Vec::new();
-    for ev in parser.push(text.as_bytes()).into_iter().chain(parser.finish()) {
+    for mut ev in parser.push(text.as_bytes()).into_iter().chain(parser.finish()) {
+        if decloak {
+            crate::oauth::hooks::decloak_event(&mut ev);
+        }
         events.extend(tr.feed(&ev));
     }
     events.extend(tr.finish());
@@ -673,7 +710,10 @@ fn stream_response(ctx: ReqCtx, resp: reqwest::Response) -> Response {
                     break;
                 }
                 Ok(None) => {
-                    if let Some(ev) = parser.finish() {
+                    if let Some(mut ev) = parser.finish() {
+                        if ctx.decloak {
+                            crate::oauth::hooks::decloak_event(&mut ev);
+                        }
                         for out in tr.feed(&ev) {
                             let _ = tx.send(Ok(out.to_bytes())).await;
                         }
@@ -693,7 +733,10 @@ fn stream_response(ctx: ReqCtx, resp: reqwest::Response) -> Response {
             if ttft.is_none() {
                 ttft = Some(ctx.started.elapsed().as_millis());
             }
-            for ev in parser.push(&chunk) {
+            for mut ev in parser.push(&chunk) {
+                if ctx.decloak {
+                    crate::oauth::hooks::decloak_event(&mut ev);
+                }
                 for out in tr.feed(&ev) {
                     if tx.send(Ok(out.to_bytes())).await.is_err() {
                         client_gone = true;

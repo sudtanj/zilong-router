@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
   sync:
@@ -35,34 +34,13 @@ jobs:
       - name: Validate generated data loads and tests pass
         run: cargo test --release --locked -q
 
-      - name: Summarise skipped providers for the PR body
-        id: skipped
+      # Actions may not open pull requests in this repo, so a sync that builds and
+      # passes the tests is committed straight to main.
+      - name: Commit if anything changed
         run: |
-          {
-            echo 'list<<EOF'
-            node -e "const s=require('./data/skipped.json').skipped; console.log(s.map(x=>'- '+x.id+' — '+x.reason).join('\n'))"
-            echo 'EOF'
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Open pull request if anything changed
-        uses: peter-evans/create-pull-request@v6
-        with:
-          add-paths: data/
-          commit-message: |
-            chore: sync providers from 9router ${{ steps.up.outputs.version }} (${{ steps.up.outputs.sha }})
-
-            Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
-          title: "Sync providers from 9router ${{ steps.up.outputs.version }}"
-          body: |
-            Automated weekly sync of the upstream provider registry and pricing tables.
-
-            - upstream: decolua/9router @ `${{ steps.up.outputs.sha }}` (v${{ steps.up.outputs.version }})
-            - regenerated: `data/providers.json`, `data/pricing.json`, `data/skipped.json`
-
-            Providers left out because they need code, not just config:
-            ${{ steps.skipped.outputs.list }}
-
-            🤖 Generated with [Claude Code](https://claude.com/claude-code)
-          branch: sync/upstream-providers
-          delete-branch: true
-          labels: upstream-sync
+          git add data/
+          if git diff --cached --quiet; then echo "no changes"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -q -m "chore: sync providers from 9router ${{ steps.up.outputs.version }} (${{ steps.up.outputs.sha }})"
+          git push origin HEAD:main

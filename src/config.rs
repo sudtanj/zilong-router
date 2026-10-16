@@ -48,7 +48,7 @@ pub struct Config {
     pub machine_id_salt: String,
 
     /// Require a valid API key even from loopback clients.
-    #[arg(long, env = "REQUIRE_API_KEY", default_value_t = false)]
+    #[arg(long, env = "REQUIRE_API_KEY", default_value_t = false, value_parser = clap::builder::BoolishValueParser::new())]
     pub require_api_key: bool,
 
     /// Tokio worker threads.
@@ -90,7 +90,7 @@ pub struct Config {
 
     /// Keep no database file on disk: run from memory and treat Turso as the only
     /// durable copy (restored at start-up, pushed every sync interval).
-    #[arg(long, env = "TURSO_ONLY", default_value_t = false)]
+    #[arg(long, env = "TURSO_ONLY", default_value_t = false, value_parser = clap::builder::BoolishValueParser::new())]
     pub turso_only: bool,
 
     /// Seconds between pushes to Turso.

@@ -444,6 +444,19 @@ pub async fn auto_preview(State(state): S) -> R {
     })))
 }
 
+// ----- token saver ---------------------------------------------------------------
+
+/// Savings since start plus the option lists; the toggles themselves live in settings.
+pub async fn token_saver(State(_state): S) -> R {
+    use crate::token_saver::{prompts, stats, OPT_OUT_HEADER};
+    Ok(Json(json!({
+        "stats": stats(),
+        "cavemanLevels": prompts::CAVEMAN_LEVELS,
+        "ponytailLevels": prompts::PONYTAIL_LEVELS,
+        "optOutHeader": OPT_OUT_HEADER,
+    })))
+}
+
 // ----- settings ------------------------------------------------------------------
 
 fn redact(mut v: Value) -> Value {
@@ -468,6 +481,14 @@ pub async fn patch_settings(State(state): S, Json(mut patch): Json<Value>) -> R 
     if let Some(s) = o.get("fallbackStrategy").and_then(Value::as_str) {
         if s != "fill-first" && s != "round-robin" {
             return Err(bad("fallbackStrategy must be fill-first or round-robin"));
+        }
+    }
+    use crate::token_saver::prompts::{CAVEMAN_LEVELS, PONYTAIL_LEVELS};
+    for (key, levels) in [("cavemanLevel", CAVEMAN_LEVELS), ("ponytailLevel", PONYTAIL_LEVELS)] {
+        if let Some(v) = o.get(key) {
+            if !v.as_str().map_or(false, |s| levels.contains(&s)) {
+                return Err(bad(format!("{key} must be one of {}", levels.join(", "))));
+            }
         }
     }
     Ok(Json(redact(state.db.save_settings(&patch)?)))

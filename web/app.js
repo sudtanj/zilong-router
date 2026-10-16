@@ -142,6 +142,7 @@ const PAGE_INFO = {
   endpoint: {title: 'Endpoint', description: 'API endpoint configuration', icon: 'api'},
   providers: {title: 'Providers', description: 'Manage your AI provider connections', icon: 'dns'},
   usage: {title: 'Usage & Analytics', description: 'Monitor your API usage, token consumption, and request logs', icon: 'bar_chart'},
+  'token-saver': {title: 'Token Saver', description: 'Compress prompts and outputs to save tokens', icon: 'savings'},
   profile: {title: 'Settings', description: 'Manage your preferences', icon: 'settings'},
 };
 const pages = {};
@@ -340,6 +341,67 @@ function keyRow(k) {
   </div>`;
 }
 
+
+// ----- Token Saver (upstream TokenSaverClient, minus Headroom/PXPIPE) ---------------
+const CAVEMAN_LEVELS = [
+  {id: 'lite', label: 'Lite', desc: 'Drop filler, keep grammar'},
+  {id: 'full', label: 'Full', desc: 'Drop articles, fragments OK'},
+  {id: 'ultra', label: 'Ultra', desc: 'Telegraphic, max compression'},
+  {id: 'wenyan-lite', label: '文 Lite', desc: 'Classical Chinese, light compression', wenyan: true},
+  {id: 'wenyan', label: '文 Full', desc: 'Maximum 文言文, 80-90% reduction', wenyan: true},
+  {id: 'wenyan-ultra', label: '文 Ultra', desc: 'Extreme classical compression', wenyan: true},
+];
+const PONYTAIL_LEVELS = [
+  {id: 'lite', label: 'Lite', desc: 'Build asked, name lazier option'},
+  {id: 'full', label: 'Full', desc: 'Ladder enforced: stdlib/native first'},
+  {id: 'ultra', label: 'Ultra', desc: 'YAGNI extremist, deletion first'},
+];
+const fmtBytes = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1024 ? (n / 1024).toFixed(1) + ' KB' : n + ' B';
+pages['token-saver'] = async () => {
+  const [s, ts] = await Promise.all([get('/settings'), get('/token-saver')]);
+  settingsCache = s;
+  const rtkOn = s.rtkEnabled !== false;
+  const cavemanLevel = s.cavemanLevel || 'full', ponytailLevel = s.ponytailLevel || 'full';
+  // Wenyan levels only make sense for Chinese readers, as upstream hides them by locale.
+  const showWenyan = /^zh/i.test(navigator.language || '') || CAVEMAN_LEVELS.find((l) => l.id === cavemanLevel)?.wenyan;
+  const levels = (list, cur, key) => `<div class="col" style="align-items:flex-end;gap:4px">
+      <div class="row wrap" style="gap:6px;justify-content:flex-end">${list.map((l) => `<button class="lvl ${l.id === cur ? 'on' : ''}" data-act="setLevel" data-key="${key}" data-level="${l.id}" title="${esc(l.desc)}">${esc(l.label)}</button>`).join('')}</div>
+      <p class="xs" style="color:var(--primary)">${esc(list.find((l) => l.id === cur)?.desc || '')}</p></div>`;
+  const row = (title, link, linkText, desc, key, on, extra = '', first = false) => `<div class="row between wrap ${first ? 'pb4' : 'pt4 mt4'}" style="gap:16px;${first ? '' : 'border-top:1px solid var(--border)'}">
+      <div class="grow" style="min-width:0">
+        <p class="medium">${esc(title)} <a class="xs" href="${link}" target="_blank" rel="noreferrer" style="color:var(--primary);text-decoration:underline">(${esc(linkText)})</a></p>
+        <p class="sm muted">${desc}</p>
+      </div>
+      <div class="row gap3 shrink0">${on ? extra : ''}${toggle(on, `data-act="setSetting" data-key="${key}"`)}</div>
+    </div>`;
+  const st = ts.stats;
+  const pct = st.bytesBefore ? ((st.bytesSaved / st.bytesBefore) * 100).toFixed(1) : '0';
+  return `<div class="page gap8">
+    <div class="card" id="rtk">
+      <h2 class="ct mb4">${ms('bolt')}Token Saver</h2>
+      ${row('Compress tool output', 'https://github.com/rtk-ai/rtk', 'RTK', 'git/grep/ls/tree/logs → 60-90% fewer input tokens', 'rtkEnabled', rtkOn, '', true)}
+      ${row('Compress LLM output', 'https://github.com/JuliusBrussee/caveman', 'Caveman', 'Terse-style system prompt → ~65% fewer output tokens (up to 87%)', 'cavemanEnabled', !!s.cavemanEnabled,
+        levels(showWenyan ? CAVEMAN_LEVELS : CAVEMAN_LEVELS.filter((l) => !l.wenyan), cavemanLevel, 'cavemanLevel'))}
+      ${row('Lazy senior dev', 'https://github.com/DietrichGebert/ponytail', 'Ponytail', 'Bias the model toward minimal code: YAGNI, reuse stdlib, deletion over addition', 'ponytailEnabled', !!s.ponytailEnabled,
+        levels(PONYTAIL_LEVELS, ponytailLevel, 'ponytailLevel'))}
+      <p class="xs muted mt4">Context compression (Headroom) is not included: it needs a Python proxy and ML models, too heavy for this device. Send <code>${esc(ts.optOutHeader)}: off</code> on a request to skip every saver for it.</p>
+    </div>
+    <div class="card">
+      <h2 class="ct mb4">${ms('savings')}Savings since start</h2>
+      <div class="row wrap" style="gap:24px">
+        <div><p class="xs muted">Requests compressed</p><p class="xl semibold">${st.requests}</p></div>
+        <div><p class="xs muted">Tool outputs compressed</p><p class="xl semibold">${st.hits}</p></div>
+        <div><p class="xs muted">Input saved</p><p class="xl semibold">${fmtBytes(st.bytesSaved)} <span class="sm muted">(${pct}%)</span></p></div>
+        <div><p class="xs muted">≈ Tokens saved</p><p class="xl semibold">${st.tokensSaved.toLocaleString()}</p></div>
+      </div>
+      <p class="xs muted mt2">RTK only; counters reset when the router restarts. Caveman and Ponytail savings show up as shorter answers on the Usage page.</p>
+    </div>
+  </div>`;
+};
+actions.setLevel = async ({key, level}) => {
+  settingsCache = await patch('/settings', {[key]: level});
+  reload();
+};
 actions.setSetting = async ({key}, b) => {
   const next = b.getAttribute('aria-checked') !== 'true';
   if (key === 'requireLogin' && !next && !session.local) {
@@ -347,7 +409,7 @@ actions.setSetting = async ({key}, b) => {
   }
   const s = await patch('/settings', {[key]: next});
   settingsCache = s; b.setAttribute('aria-checked', String(next));
-  if (key === 'requireLogin' || key === 'fallbackStrategy') reload();
+  if (['requireLogin', 'fallbackStrategy', 'cavemanEnabled', 'ponytailEnabled'].includes(key)) reload();
 };
 actions.addKey = () => openModal({
   title: 'Create API Key',

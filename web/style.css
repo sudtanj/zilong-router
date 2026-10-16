@@ -344,3 +344,4 @@ table.recent .dot{display:block;width:6px;height:6px;border-radius:50%}
   .hbar{grid-template-columns:90px 1fr 60px}
   table.ut th,table.ut td{padding:10px 12px}
 }
+.lvl{padding:6px 12px;border-radius:6px;font-size:12px;font-weight:500;border:1px solid var(--border);color:var(--text-muted);background:transparent;transition:all .15s}.lvl:hover{background:var(--surface-2)}.lvl.on{background:var(--primary);border-color:var(--primary);color:#fff}

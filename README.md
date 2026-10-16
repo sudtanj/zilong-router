@@ -74,6 +74,19 @@ At most `settings.autoMaxAttempts` (default 5) models are actually sent the requ
 Requests from the Pi itself need no key. Requests from the LAN need one, and you can
 force keys everywhere with `mini-router settings requireApiKey=true`.
 
+## Token Saver
+
+Same feature and settings keys as 9router's Token Saver page, minus context
+compression (Headroom), which needs a Python proxy and ML models:
+
+- **RTK** (`rtkEnabled`, on by default): compacts tool results such as git diff/status/log,
+  grep, find, ls, tree and build logs before they reach the model, often 60-90% fewer input tokens.
+- **Caveman** (`cavemanEnabled`, `cavemanLevel` = lite | full | ultra | wenyan-lite | wenyan | wenyan-ultra):
+  a terse-style system prompt for shorter answers.
+- **Ponytail** (`ponytailEnabled`, `ponytailLevel` = lite | full | ultra): biases the model toward minimal code.
+
+A client can skip all of them for one request with the header `x-9router-token-saver: off`.
+
 ## Dashboard
 
 Open `http://pi:20128/` in a browser. The dashboard is a faithful port of 9router's

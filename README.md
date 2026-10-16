@@ -58,6 +58,19 @@ Model names are `provider/model` (`ds/deepseek-chat` with the short alias also w
 a saved alias (`fast`), a custom-endpoint prefix (`local/qwen3`), or a bare model id,
 which is routed by name (`claude-*` to Anthropic, `gpt-*` to OpenAI, …).
 
+Model `auto` (like OpenRouter's `openrouter/auto`) routes to whatever is available:
+it walks candidate models until one answers, skipping models whose accounts are all
+cooling down, and reports the one it used in the `x-mini-router-model` response header.
+Candidates come from, in order of preference:
+
+1. the request's `models` array (OpenRouter's fallback-list field), e.g.
+   `{"model": "auto", "models": ["groq/llama-3.3-70b-versatile", "ds/deepseek-chat"]}`;
+2. `settings.autoModels`, e.g. `mini-router settings 'autoModels=["groq/llama-3.3-70b-versatile","ds/deepseek-chat"]'`;
+3. otherwise every catalogue model of every provider with an active account: each
+   provider's first model (providers by account priority), then their second, and so on.
+
+At most `settings.autoMaxAttempts` (default 5) models are actually sent the request.
+
 Requests from the Pi itself need no key. Requests from the LAN need one, and you can
 force keys everywhere with `mini-router settings requireApiKey=true`.
 

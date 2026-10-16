@@ -81,6 +81,49 @@ pub fn resolve(
     Resolved { provider: infer_provider(s).to_string(), model: s.to_string(), pinned_connection: None }
 }
 
+/// `auto` (also `mini-router/auto`): let the router pick any available model.
+pub fn is_auto(raw: &str) -> bool {
+    matches!(strip_context_marker(raw).to_ascii_lowercase().as_str(), "auto" | "mini-router/auto")
+}
+
+/// Ordered candidates for `auto`.
+///
+/// * `explicit`: the request's `models` array (OpenRouter's fallback list) or
+///   `settings.autoModels`; each entry is resolved like a normal model string.
+/// * Otherwise every catalogue model of every provider with an active account: the
+///   first model of each provider (providers by best account priority), then the
+///   rest, so one broken provider does not eat the whole attempt budget.
+pub fn auto_candidates(
+    registry: &Registry,
+    aliases: &serde_json::Map<String, Value>,
+    connections: &[ProviderConnection],
+    explicit: &[String],
+) -> Vec<Resolved> {
+    if !explicit.is_empty() {
+        return explicit.iter().filter(|m| !is_auto(m)).map(|m| resolve(registry, aliases, connections, m)).collect();
+    }
+    let rank = |id: &str| {
+        connections.iter().filter(|c| c.is_active && c.provider == id).map(|c| c.priority.unwrap_or(999)).min()
+    };
+    let mut providers: Vec<(i64, i64, &crate::providers::Provider)> = registry
+        .all()
+        .iter()
+        .filter(|p| !p.models.is_empty())
+        .filter_map(|p| rank(&p.id).or(p.no_auth.then_some(1000)).map(|r| (r, p.priority, p)))
+        .collect();
+    providers.sort_by_key(|(r, prio, _)| (*r, *prio));
+    let depth = providers.iter().map(|(_, _, p)| p.models.len()).max().unwrap_or(0);
+    let mut out = Vec::new();
+    for i in 0..depth {
+        for (_, _, p) in &providers {
+            if let Some(m) = p.models.get(i) {
+                out.push(Resolved { provider: p.id.clone(), model: m.id.clone(), pinned_connection: None });
+            }
+        }
+    }
+    out
+}
+
 fn alias_target(registry: &Registry, v: &Value) -> Option<Resolved> {
     let (p, m) = match v {
         Value::String(s) => s.split_once('/').map(|(p, m)| (p.to_string(), m.to_string()))?,
@@ -107,5 +150,21 @@ mod tests {
         assert_eq!(resolve(&r, &aliases, &[], "fast").provider, "groq");
         assert_eq!(resolve(&r, &aliases, &[], "claude-sonnet-4-5[1m]").provider, "anthropic");
         assert_eq!(resolve(&r, &aliases, &[], "gpt-4o").model, "gpt-4o");
+    }
+
+    #[test]
+    fn auto_candidates_follow_explicit_list_or_accounts() {
+        let r = Registry::load(None).unwrap();
+        let aliases = serde_json::Map::new();
+        assert!(is_auto("auto") && is_auto("mini-router/auto") && !is_auto("openrouter/auto"));
+
+        let explicit = ["ds/deepseek-chat".to_string(), "auto".to_string(), "gpt-4o".to_string()];
+        let c = auto_candidates(&r, &aliases, &[], &explicit);
+        assert_eq!(c.len(), 2);
+        assert_eq!((c[0].provider.as_str(), c[0].model.as_str()), ("deepseek", "deepseek-chat"));
+
+        // No accounts: only no-auth providers can be offered.
+        let c = auto_candidates(&r, &aliases, &[], &[]);
+        assert!(c.iter().all(|x| r.get(&x.provider).map(|p| p.no_auth).unwrap_or(false)));
     }
 }

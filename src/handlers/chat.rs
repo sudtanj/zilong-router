@@ -4,6 +4,7 @@
 
 use std::collections::HashSet;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -105,7 +106,7 @@ async fn handle_inner(
 ) -> Result<Response, ApiError> {
     let started = Instant::now();
     let caller = auth(&state, peer, &headers, uri.query(), source)?;
-    let body: Value =
+    let mut body: Value =
         serde_json::from_slice(&raw).map_err(|e| ApiError::new(400, source, format!("invalid JSON body: {e}")))?;
     let endpoint = uri.path().to_string();
     let raw_model = body
@@ -118,7 +119,119 @@ async fn handle_inner(
 
     let aliases = state.db.kv_scope("modelAliases").map_err(|e| ApiError::new(500, source, e.to_string()))?;
     let connections = state.db.all_connections().map_err(|e| ApiError::new(500, source, e.to_string()))?;
-    let resolved = crate::model::resolve(&state.registry, &aliases, &connections, &raw_model);
+    let body_len = raw.len();
+    let auto = crate::model::is_auto(&raw_model);
+    // OpenRouter-style fallback list; consumed here, never forwarded upstream.
+    let requested: Vec<String> = match body.as_object_mut().and_then(|o| o.remove("models")) {
+        Some(Value::Array(a)) if auto => a.into_iter().filter_map(|m| m.as_str().map(str::to_string)).collect(),
+        Some(other) if !auto => {
+            body["models"] = other;
+            Vec::new()
+        }
+        _ => Vec::new(),
+    };
+    let sends = AtomicUsize::new(0);
+    let req = Req {
+        caller: &caller,
+        headers: &headers,
+        source,
+        body: &body,
+        client_stream,
+        endpoint: &endpoint,
+        started,
+        body_len,
+        sends: &sends,
+    };
+
+    if !auto {
+        let resolved = crate::model::resolve(&state.registry, &aliases, &connections, &raw_model);
+        return attempt(&state, &req, &resolved, &raw_model).await;
+    }
+
+    // `auto`: walk the candidates until one answers. Upstream errors only surface
+    // before the first byte is sent, so moving on to the next model is always safe.
+    let settings = state.db.settings();
+    let explicit: Vec<String> = if requested.is_empty() {
+        settings
+            .get("autoModels")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|m| m.as_str().map(str::to_string))
+            .collect()
+    } else {
+        requested
+    };
+    let max = settings.get("autoMaxAttempts").and_then(Value::as_u64).unwrap_or(5).max(1) as usize;
+    let candidates = crate::model::auto_candidates(&state.registry, &aliases, &connections, &explicit);
+
+    let mut last: Option<ApiError> = None;
+    let (mut sent, mut tried_models) = (0usize, 0usize);
+    for c in candidates {
+        let Some(p) = state.registry.get(&c.provider) else { continue };
+        let usable = caller.may_use(&p.id, &c.model)
+            && p.transport_for(source, &c.model).map(|t| t.format.supported()).unwrap_or(false);
+        if !usable {
+            continue;
+        }
+        let label = format!("{}/{}", p.id, c.model);
+        match attempt(&state, &req, &c, &label).await {
+            Ok(mut resp) => {
+                if let Ok(v) = header::HeaderValue::from_str(&label) {
+                    resp.headers_mut().insert("x-mini-router-model", v);
+                }
+                return Ok(resp);
+            }
+            Err(e) => {
+                tracing::info!(
+                    "auto: {label} unavailable ({} {}), trying the next model",
+                    e.status.as_u16(),
+                    e.message
+                );
+                last = Some(e);
+                // Models whose accounts are all missing or cooling down cost no upstream
+                // call; only models that were actually tried count against the budget.
+                if req.sends.load(Ordering::Relaxed) > sent {
+                    sent = req.sends.load(Ordering::Relaxed);
+                    tried_models += 1;
+                }
+                if tried_models >= max {
+                    break;
+                }
+            }
+        }
+    }
+    Err(match last {
+        Some(e) => ApiError { message: format!("auto: no model succeeded; last error: {}", e.message), ..e },
+        None => ApiError::new(
+            404,
+            source,
+            "auto: no usable model. Add a provider account, or list models in settings.autoModels",
+        ),
+    })
+}
+
+#[derive(Clone, Copy)]
+struct Req<'a> {
+    caller: &'a Caller,
+    headers: &'a HeaderMap,
+    source: Format,
+    body: &'a Value,
+    client_stream: bool,
+    endpoint: &'a str,
+    started: Instant,
+    body_len: usize,
+    /// Upstream calls made so far (across `auto` candidates).
+    sends: &'a AtomicUsize,
+}
+
+async fn attempt(
+    state: &Arc<AppState>,
+    req: &Req<'_>,
+    resolved: &crate::model::Resolved,
+    raw_model: &str,
+) -> Result<Response, ApiError> {
+    let Req { caller, headers, source, body, client_stream, endpoint, started, body_len, .. } = *req;
     let provider = state.registry.get(&resolved.provider).ok_or_else(|| {
         ApiError::new(404, source, format!("Unknown provider '{}' in model '{raw_model}'", resolved.provider))
     })?;
@@ -144,13 +257,12 @@ async fn handle_inner(
     }
     let target = transport.format;
     let upstream_model = provider.upstream_model_id(&resolved.model).to_string();
-    let mut upstream_body = translator::translate_request(source, target, body, &upstream_model)
+    let mut upstream_body = translator::translate_request(source, target, body.clone(), &upstream_model)
         .map_err(|e| ApiError::new(406, source, e))?;
     upstream_body["stream"] = json!(client_stream);
     if client_stream && target == Format::Openai && upstream_body.get("stream_options").is_none() {
         upstream_body["stream_options"] = json!({"include_usage": true});
     }
-    let body_len = raw.len();
 
     let mut exclude: HashSet<String> = HashSet::new();
     let mut last_err: Option<(u16, String)> = None;
@@ -191,6 +303,7 @@ async fn handle_inner(
             }
         };
         tried += 1;
+        req.sends.fetch_add(1, Ordering::Relaxed);
         let level = conn.data.get("backoffLevel").and_then(Value::as_i64).unwrap_or(0);
 
         match executor::send(
@@ -213,7 +326,7 @@ async fn handle_inner(
                     model: resolved.model.clone(),
                     conn,
                     api_key: caller.key_value().map(str::to_string),
-                    endpoint,
+                    endpoint: endpoint.to_string(),
                     started,
                     body_len,
                     source,

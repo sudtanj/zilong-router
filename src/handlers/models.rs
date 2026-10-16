@@ -28,7 +28,13 @@ fn model_entries(state: &AppState, caller: &Caller) -> anyhow::Result<Vec<Value>
     let conns = state.db.all_connections()?;
     let active: BTreeSet<&str> = conns.iter().filter(|c| c.is_active).map(|c| c.provider.as_str()).collect();
     let created = state.started_at.elapsed().as_secs() as i64;
-    let mut out = Vec::new();
+    let mut out = vec![json!({
+        "id": "auto",
+        "object": "model",
+        "created": created,
+        "owned_by": "mini-router",
+        "name": "Auto (first available model)",
+    })];
     for p in state.registry.all() {
         if !active.contains(p.id.as_str()) && !p.no_auth {
             continue;

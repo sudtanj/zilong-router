@@ -624,6 +624,7 @@ async function providerDetail(rawId) {
   const addBtn = `<div class="row gap2 wrap">${signInBtn}${custom || !prov.oauth || prov.acceptsApiKey ? keyBtn : ''}</div>`;
 
   return `<div class="page">
+    ${!custom && prov.riskNotice ? `<div class="warn-box">${ms('warning', 16)}<p class="grow">${esc(prov.riskNotice)}</p></div>` : ''}
     ${custom ? `<div class="card"><div class="row between start wrap gap3">
         <div class="grow"><h2 class="ct">${esc(meta.name)} Details</h2><p class="sm muted break">${esc(meta.api)} · ${esc((node.baseUrl || '').replace(/\/$/, ''))}${esc(meta.path)} · prefix <code>${esc(prefix)}</code></p></div>
         <div class="row gap2 wrap"><button class="btn sm secondary" data-act="editConn" data-id="${node.id}">${ms('edit')}Edit</button><button class="btn sm secondary" data-act="delConn" data-id="${node.id}" data-back="1">${ms('delete')}Delete</button></div>

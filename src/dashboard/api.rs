@@ -178,6 +178,7 @@ pub async fn providers(State(state): S) -> R {
                 "color": d.color,
                 "website": d.website,
                 "apiKeyUrl": d.api_key_url,
+                "riskNotice": d.deprecation_notice.as_ref().filter(|_| d.deprecated),
                 "accounts": conns.iter().filter(|c| c.provider == p.id).count(),
                 "models": p.models.iter().map(|m| json!({"id": m.id, "name": m.name})).collect::<Vec<_>>(),
             })

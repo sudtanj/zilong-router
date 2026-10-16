@@ -46,6 +46,7 @@ try {
   const SPECIAL_EXECUTORS = new Set(["antigravity","azure","bedrock","bedrock-xai","codebuddy-cn","codebuddy-intl","codex","commandcode","cursor","devin-cli","gemini-cli","github","grok-cli","grok-web","iflow","kimchi","kiro","mimo-free","minimax-code","minimax-code-global","ollama-local","opencode","opencode-go","opencode-zen","perplexity-web","qoder","qoder-cn","trae","vertex","vertex-partner","windsurf","xiaomi-mimo","xiaomi-tokenplan","zed"]);
   // Upstream-special providers mini-router implements natively (src/oauth): their
   // sign-in, token refresh and request quirks are ported, so keep them.
+  const RISK_NOTICE = "⚠️ Risk Notice: This provider uses a subscription/OAuth session not officially licensed for proxy/router use. Account may be restricted or banned. Use at your own risk.";
   const NATIVE = new Set(["claude", "cline", "clinepass", "github", "kilocode", "kimi", "mimo-free", "minimax-code", "minimax-code-global", "muse", "nous", "xai"]);
   const SUPPORTED_FORMATS = new Set(["openai", "claude"]);
   const skipped = [];
@@ -58,7 +59,8 @@ try {
     if (!NATIVE.has(e.id) && (SPECIAL_EXECUTORS.has(e.id) || e.transport.executor)) { skip(e, "needs a dedicated executor"); continue; }
     if (!SUPPORTED_FORMATS.has(e.transport.format || "openai")) { skip(e, `wire format \"${e.transport.format}\" not implemented`); continue; }
     if (!NATIVE.has(e.id) && !acceptsApiKey(e)) { skip(e, "OAuth-only login flow"); continue; }
-    if (e.display?.deprecated) { skip(e, "marked deprecated upstream"); continue; }
+    // Upstream still offers its natively-ported providers with a risk banner.
+    if (e.display?.deprecated && !NATIVE.has(e.id)) { skip(e, "marked deprecated upstream"); continue; }
     // Keep only what the Rust router needs; media/UI-only fields are dropped.
     const transport = e.transport ? { ...e.transport } : null;
     if (transport) {
@@ -80,7 +82,7 @@ try {
       authModes: e.authModes || null,
       noAuth: !!e.noAuth,
       priority: e.priority ?? 999,
-      display: e.display ? { name: e.display.name, color: e.display.color, textIcon: e.display.textIcon, icon: e.display.icon, website: e.display.website, apiKeyUrl: e.display.notice?.apiKeyUrl || e.display.notice?.signupUrl || null, deprecated: !!e.display.deprecated } : null,
+      display: e.display ? { name: e.display.name, color: e.display.color, textIcon: e.display.textIcon, icon: e.display.icon, website: e.display.website, apiKeyUrl: e.display.notice?.apiKeyUrl || e.display.notice?.signupUrl || null, deprecated: !!e.display.deprecated, deprecationNotice: e.display.deprecationNotice === "RISK_NOTICE" ? RISK_NOTICE : e.display.deprecationNotice || null } : null,
       transport,
       transports: e.transports || null,
       oauth: e.oauth || null,

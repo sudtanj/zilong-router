@@ -89,6 +89,10 @@ refreshed automatically before they expire (and once more after a 401).
 | xAI (`xai`), Cline, Cline Pass | Same: paste the callback address. xAI always lands on `http://127.0.0.1:56121/callback`. |
 | GitHub Copilot, Kimi, Kilo Code, MiniMax Code (CN / global), Nous, Muse | Device code: the dashboard shows a code, you enter it on the provider's page, the dashboard notices when you approve. |
 
+Claude Code and GitHub Copilot carry upstream's risk notice: they use a subscription session
+that is not licensed for proxy use, so the account may be restricted or banned. The
+dashboard shows that warning on their pages.
+
 Behind the scenes, as upstream does: Claude sign-ins send Claude Code's identity (system
 prompt, billing header, `metadata.user_id`) and rename tools so they don't clash with
 Claude Code's own, restoring the names in the reply. GitHub accounts trade the GitHub token

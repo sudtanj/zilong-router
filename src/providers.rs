@@ -100,6 +100,8 @@ pub struct Display {
     pub api_key_url: Option<String>,
     #[serde(default)]
     pub deprecated: bool,
+    /// Upstream's warning for subscription sign-ins (account ban risk).
+    pub deprecation_notice: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

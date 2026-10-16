@@ -46,11 +46,6 @@
    "reason": "no LLM transport (media-only provider)"
   },
   {
-   "id": "claude",
-   "name": "Claude Code",
-   "reason": "marked deprecated upstream"
-  },
-  {
    "id": "codebuddy-cn",
    "name": "CodeBuddy CN",
    "reason": "needs a dedicated executor"
@@ -124,11 +119,6 @@
    "id": "gemini-cli",
    "name": "Gemini CLI",
    "reason": "needs a dedicated executor"
-  },
-  {
-   "id": "github",
-   "name": "GitHub Copilot",
-   "reason": "marked deprecated upstream"
   },
   {
    "id": "gitlab",

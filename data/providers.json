@@ -23,7 +23,8 @@
     "icon": "auto_awesome",
     "website": "https://agnes-ai.com",
     "apiKeyUrl": "https://platform.agnes-ai.com",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://apihub.agnes-ai.com/v1/chat/completions",
@@ -69,7 +70,8 @@
     "icon": "cloud",
     "website": "https://bailian.console.aliyun.com",
     "apiKeyUrl": "https://bailian.console.aliyun.com/?apiKey=1",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://coding.dashscope.aliyuncs.com/v1/chat/completions",
@@ -134,7 +136,8 @@
     "icon": "cloud",
     "website": "https://www.alibabacloud.com/product/coding",
     "apiKeyUrl": "https://www.alibabacloud.com/product/coding",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://coding-intl.dashscope.aliyuncs.com/v1/chat/completions",
@@ -195,7 +198,8 @@
     "icon": "cloud",
     "website": "https://modelstudio.console.alibabacloud.com",
     "apiKeyUrl": "https://modelstudio.console.alibabacloud.com/?apiKey=1",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
@@ -256,7 +260,8 @@
     "icon": "cloud",
     "website": "https://www.alibabacloud.com/campaign/ai-landing-page-token",
     "apiKeyUrl": "https://modelstudio.console.alibabacloud.com/?apiKey=1",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1/chat/completions",
@@ -313,7 +318,8 @@
     "icon": "smart_toy",
     "website": "https://console.anthropic.com",
     "apiKeyUrl": "https://console.anthropic.com/settings/keys",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.anthropic.com/v1/messages",
@@ -362,7 +368,8 @@
     "icon": "flight",
     "website": "https://api.airforce",
     "apiKeyUrl": "https://api.airforce",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.airforce/v1/chat/completions",
@@ -414,7 +421,8 @@
     "icon": "record_voice_over",
     "website": "https://assemblyai.com",
     "apiKeyUrl": "https://www.assemblyai.com/app/api-keys",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.assemblyai.com/v1/audio/transcriptions",
@@ -445,7 +453,8 @@
     "icon": "flare",
     "website": "https://atria-asi.ai",
     "apiKeyUrl": "https://api.atria-asi.ai/dashboard",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.atria-asi.ai/v1/chat/completions",
@@ -481,7 +490,8 @@
     "icon": "account_balance",
     "website": "https://b.ai",
     "apiKeyUrl": "https://b.ai",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.b.ai/v1/chat/completions",
@@ -516,7 +526,8 @@
     "icon": "search",
     "website": "https://cloud.baidu.com/product/qianfan.html",
     "apiKeyUrl": "https://console.bce.baidu.com/qianfan/ais/console/applicationConsole/application",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://qianfan.baidubce.com/v2/chat/completions",
@@ -585,7 +596,8 @@
     "icon": "storefront",
     "website": "https://bazaarlink.ai",
     "apiKeyUrl": "https://bazaarlink.ai",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://bazaarlink.ai/api/v1/chat/completions",
@@ -736,7 +748,8 @@
     "icon": "smart_toy",
     "website": "https://blackbox.ai",
     "apiKeyUrl": "https://www.blackbox.ai/api-management",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.blackbox.ai/v1/chat/completions",
@@ -830,7 +843,8 @@
     "icon": "psychology",
     "website": "https://bluesminds.com",
     "apiKeyUrl": "https://bluesminds.com",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.bluesminds.com/v1/chat/completions",
@@ -932,7 +946,8 @@
     "icon": "cloud",
     "website": "https://console.byteplus.com/ark",
     "apiKeyUrl": "https://console.byteplus.com/ark/region:ark+ap-southeast-1/apiKey",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://ark.ap-southeast.bytepluses.com/api/coding/v3/chat/completions",
@@ -990,7 +1005,8 @@
     "icon": "memory",
     "website": "https://www.cerebras.ai",
     "apiKeyUrl": "https://cloud.cerebras.ai/platform",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.cerebras.ai/v1/chat/completions",
@@ -1049,7 +1065,8 @@
     "icon": "water_drop",
     "website": "https://chutes.ai",
     "apiKeyUrl": "https://chutes.ai/app/api",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://llm.chutes.ai/v1/chat/completions",
@@ -1059,6 +1076,116 @@
    "transports": null,
    "oauth": null,
    "models": [],
+   "passthroughModels": false,
+   "thinkingConfig": null
+  },
+  {
+   "id": "claude",
+   "alias": "cc",
+   "aliases": [],
+   "category": "oauth",
+   "authType": "oauth",
+   "authModes": null,
+   "noAuth": false,
+   "priority": 10,
+   "display": {
+    "name": "Claude Code",
+    "color": "#D97757",
+    "icon": "smart_toy",
+    "website": "https://claude.ai",
+    "apiKeyUrl": "https://claude.ai",
+    "deprecated": true,
+    "deprecationNotice": "⚠️ Risk Notice: This provider uses a subscription/OAuth session not officially licensed for proxy/router use. Account may be restricted or banned. Use at your own risk."
+   },
+   "transport": {
+    "baseUrl": "https://api.anthropic.com/v1/messages",
+    "format": "claude",
+    "urlSuffix": "?beta=true",
+    "headers": {
+     "Anthropic-Version": "2023-06-01",
+     "Anthropic-Beta": "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,advanced-tool-use-2025-11-20,effort-2025-11-24,structured-outputs-2025-12-15,fast-mode-2026-02-01,redact-thinking-2026-02-12,token-efficient-tools-2026-03-28",
+     "Anthropic-Dangerous-Direct-Browser-Access": "true",
+     "User-Agent": "claude-cli/2.1.280 (external, sdk-cli)",
+     "X-App": "cli",
+     "X-Stainless-Helper-Method": "stream",
+     "X-Stainless-Retry-Count": "0",
+     "X-Stainless-Runtime-Version": "v24.14.0",
+     "X-Stainless-Package-Version": "0.80.0",
+     "X-Stainless-Runtime": "node",
+     "X-Stainless-Lang": "js",
+     "X-Stainless-Arch": "arm64",
+     "X-Stainless-Os": "MacOS",
+     "X-Stainless-Timeout": "600"
+    },
+    "quirks": {
+     "cloakToolsOnOAuth": true
+    },
+    "auth": {
+     "apiKey": {
+      "header": "x-api-key",
+      "scheme": "raw"
+     },
+     "oauth": {
+      "header": "Authorization",
+      "scheme": "bearer"
+     }
+    },
+    "usage": {
+     "oauthUrl": "https://api.anthropic.com/api/oauth/usage",
+     "orgUrl": "https://api.anthropic.com/v1/organizations/{org_id}/usage",
+     "settingsUrl": "https://api.anthropic.com/v1/settings",
+     "profileUrl": "https://api.anthropic.com/api/oauth/profile",
+     "resetUrl": "https://api.anthropic.com/api/organizations/{org_id}/reset_rate_limits"
+    },
+    "clientId": "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+    "tokenUrl": "https://api.anthropic.com/v1/oauth/token"
+   },
+   "transports": null,
+   "oauth": {
+    "clientId": "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+    "authorizeUrl": "https://claude.ai/oauth/authorize",
+    "tokenUrl": "https://api.anthropic.com/v1/oauth/token",
+    "scopes": [
+     "org:create_api_key",
+     "user:profile",
+     "user:inference"
+    ],
+    "codeChallengeMethod": "S256",
+    "refreshLeadMs": 14400000,
+    "refresh": {
+     "encoding": "json"
+    }
+   },
+   "models": [
+    {
+     "id": "claude-opus-5-5",
+     "name": "Claude Opus 5.5"
+    },
+    {
+     "id": "claude-opus-5",
+     "name": "Claude Opus 5"
+    },
+    {
+     "id": "claude-fable-5-1",
+     "name": "Claude Fable 5.1"
+    },
+    {
+     "id": "claude-fable-5",
+     "name": "Claude Fable 5"
+    },
+    {
+     "id": "claude-sonnet-5-5",
+     "name": "Claude Sonnet 5.5"
+    },
+    {
+     "id": "claude-sonnet-5",
+     "name": "Claude Sonnet 5"
+    },
+    {
+     "id": "claude-haiku-4-5-20251001",
+     "name": "Claude 4.5 Haiku"
+    }
+   ],
    "passthroughModels": false,
    "thinkingConfig": null
   },
@@ -1080,7 +1207,8 @@
     "icon": "smart_toy",
     "website": "https://cline.bot",
     "apiKeyUrl": "https://cline.bot",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.cline.bot/api/v1/chat/completions",
@@ -1167,7 +1295,8 @@
     "icon": "vpn_key",
     "website": "https://cline.bot",
     "apiKeyUrl": "https://app.cline.bot",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.cline.bot/api/v1/chat/completions",
@@ -1269,7 +1398,8 @@
     "icon": "cloud",
     "website": "https://developers.cloudflare.com/workers-ai/",
     "apiKeyUrl": "https://dash.cloudflare.com/profile/api-tokens",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.cloudflare.com/client/v4/accounts/{accountId}/ai/v1/chat/completions",
@@ -1351,7 +1481,8 @@
     "icon": "hub",
     "website": "https://cohere.com",
     "apiKeyUrl": "https://dashboard.cohere.com/api-keys",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.cohere.ai/v1/chat/completions",
@@ -1395,7 +1526,8 @@
     "icon": "hub",
     "website": "https://dahl.global",
     "apiKeyUrl": "https://dahl.global/dashboard",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://inference.dahl.global/v1/chat/completions",
@@ -1439,7 +1571,8 @@
     "icon": "mic",
     "website": "https://deepgram.com",
     "apiKeyUrl": "https://console.deepgram.com/api-keys",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.deepgram.com/v1/listen",
@@ -1469,7 +1602,8 @@
     "icon": "bolt",
     "website": "https://deepseek.com",
     "apiKeyUrl": "https://platform.deepseek.com/api_keys",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.deepseek.com/chat/completions",
@@ -1567,7 +1701,8 @@
     "icon": "flutter_dash",
     "website": "https://featherless.ai",
     "apiKeyUrl": "https://featherless.ai/account/api-keys",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.featherless.ai/v1/chat/completions",
@@ -1625,7 +1760,8 @@
     "icon": "local_fire_department",
     "website": "https://fireworks.ai",
     "apiKeyUrl": "https://fireworks.ai/account/api-keys",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.fireworks.ai/inference/v1/chat/completions",
@@ -1652,6 +1788,140 @@
    "thinkingConfig": null
   },
   {
+   "id": "github",
+   "alias": "gh",
+   "aliases": [],
+   "category": "oauth",
+   "authType": "oauth",
+   "authModes": null,
+   "noAuth": false,
+   "priority": 40,
+   "display": {
+    "name": "GitHub Copilot",
+    "color": "#333333",
+    "icon": "code",
+    "website": "https://github.com/features/copilot",
+    "apiKeyUrl": "https://github.com/features/copilot",
+    "deprecated": true,
+    "deprecationNotice": "⚠️ Risk Notice: This provider uses a subscription/OAuth session not officially licensed for proxy/router use. Account may be restricted or banned. Use at your own risk."
+   },
+   "transport": {
+    "baseUrl": "https://api.githubcopilot.com/chat/completions",
+    "responsesUrl": "https://api.githubcopilot.com/responses",
+    "messagesUrl": "https://api.githubcopilot.com/v1/messages",
+    "headers": {
+     "copilot-integration-id": "vscode-chat",
+     "editor-version": "vscode/1.110.0",
+     "editor-plugin-version": "copilot-chat/0.38.0",
+     "user-agent": "GitHubCopilotChat/0.38.0",
+     "openai-intent": "conversation-panel",
+     "x-github-api-version": "2025-04-01",
+     "x-vscode-user-agent-library-version": "electron-fetch",
+     "X-Initiator": "user",
+     "Accept": "application/json",
+     "Content-Type": "application/json"
+    },
+    "copilot": {
+     "vscodeVersion": "1.110.0",
+     "chatVersion": "0.38.0",
+     "userAgent": "GitHubCopilotChat/0.38.0",
+     "apiVersion": "2025-04-01"
+    },
+    "usage": {
+     "url": "https://api.github.com/copilot_internal/user"
+    },
+    "format": "openai",
+    "clientId": "Iv1.b507a08c87ecfe98",
+    "tokenUrl": "https://github.com/login/oauth/access_token"
+   },
+   "transports": null,
+   "oauth": {
+    "clientId": "Iv1.b507a08c87ecfe98",
+    "authorizeUrl": "https://github.com/login/oauth/authorize",
+    "deviceCodeUrl": "https://github.com/login/device/code",
+    "tokenUrl": "https://github.com/login/oauth/access_token",
+    "userInfoUrl": "https://api.github.com/user",
+    "scopes": "read:user",
+    "apiVersion": "2022-11-28",
+    "copilotTokenUrl": "https://api.github.com/copilot_internal/v2/token",
+    "userAgent": "GitHubCopilotChat/0.26.7",
+    "editorVersion": "vscode/1.85.0",
+    "editorPluginVersion": "copilot-chat/0.26.7"
+   },
+   "models": [
+    {
+     "id": "gpt-5.2",
+     "name": "GPT-5.2"
+    },
+    {
+     "id": "gpt-5.2-codex",
+     "name": "GPT-5.2 Codex"
+    },
+    {
+     "id": "gpt-5.3-codex",
+     "name": "GPT-5.3 Codex"
+    },
+    {
+     "id": "gpt-5.4",
+     "name": "GPT-5.4"
+    },
+    {
+     "id": "gpt-5.4-mini",
+     "name": "GPT-5.4 Mini"
+    },
+    {
+     "id": "claude-haiku-4.5",
+     "name": "Claude Haiku 4.5"
+    },
+    {
+     "id": "claude-opus-4.5",
+     "name": "Claude Opus 4.5"
+    },
+    {
+     "id": "claude-sonnet-4.5",
+     "name": "Claude Sonnet 4.5"
+    },
+    {
+     "id": "claude-sonnet-4.6",
+     "name": "Claude Sonnet 4.6"
+    },
+    {
+     "id": "claude-opus-4.6",
+     "name": "Claude Opus 4.6"
+    },
+    {
+     "id": "claude-opus-4.7",
+     "name": "Claude Opus 4.7"
+    },
+    {
+     "id": "gemini-2.5-pro",
+     "name": "Gemini 2.5 Pro"
+    },
+    {
+     "id": "gemini-3-flash-preview",
+     "name": "Gemini 3 Flash"
+    },
+    {
+     "id": "gemini-3.1-pro-preview",
+     "name": "Gemini 3.1 Pro"
+    },
+    {
+     "id": "grok-code-fast-1",
+     "name": "Grok Code Fast 1"
+    },
+    {
+     "id": "oswe-vscode-prime",
+     "name": "Raptor Mini"
+    },
+    {
+     "id": "goldeneye-free-auto",
+     "name": "GoldenEye"
+    }
+   ],
+   "passthroughModels": false,
+   "thinkingConfig": null
+  },
+  {
    "id": "glm",
    "alias": "glm",
    "aliases": [],
@@ -1670,7 +1940,8 @@
     "icon": "code",
     "website": "https://open.bigmodel.cn",
     "apiKeyUrl": "https://open.bigmodel.cn/usercenter/apikeys",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.z.ai/api/anthropic/v1/messages",
@@ -1775,7 +2046,8 @@
     "icon": "code",
     "website": "https://open.bigmodel.cn",
     "apiKeyUrl": "https://open.bigmodel.cn/usercenter/apikeys",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
@@ -1848,7 +2120,8 @@
     "icon": "speed",
     "website": "https://groq.com",
     "apiKeyUrl": "https://console.groq.com/keys",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.groq.com/openai/v1/chat/completions",
@@ -1899,7 +2172,8 @@
     "icon": "bolt",
     "website": "https://hyperbolic.xyz",
     "apiKeyUrl": "https://app.hyperbolic.xyz/settings",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.hyperbolic.xyz/v1/chat/completions",
@@ -1966,7 +2240,8 @@
     "icon": "login",
     "website": "https://kilo.ai",
     "apiKeyUrl": "https://kilo.ai/dashboard?tab=apiKeys",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.kilo.ai/api/gateway/chat/completions",
@@ -2026,7 +2301,8 @@
     "icon": "code",
     "website": "https://kilocode.ai",
     "apiKeyUrl": "https://kilocode.ai",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.kilo.ai/api/openrouter/chat/completions",
@@ -2106,7 +2382,8 @@
     "icon": "psychology",
     "website": "https://kimi.moonshot.cn",
     "apiKeyUrl": "https://platform.moonshot.ai/console/api-keys",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.kimi.com/coding/v1/messages",
@@ -2244,7 +2521,8 @@
     "icon": "pool",
     "website": "https://llm7.io",
     "apiKeyUrl": "https://llm7.io",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.llm7.io/v1/chat/completions",
@@ -2298,7 +2576,8 @@
     "textIcon": "MF",
     "icon": "smart_toy",
     "apiKeyUrl": null,
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.xiaomimimo.com/api/free-ai/openai/chat",
@@ -2332,7 +2611,8 @@
     "icon": "memory",
     "website": "https://www.minimaxi.com",
     "apiKeyUrl": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.minimax.io/anthropic/v1/messages",
@@ -2425,7 +2705,8 @@
     "icon": "memory",
     "website": "https://www.minimaxi.com",
     "apiKeyUrl": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.minimaxi.com/anthropic/v1/messages",
@@ -2520,7 +2801,8 @@
     "icon": "smart_toy",
     "website": "https://agent.minimax.cn",
     "apiKeyUrl": null,
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://agent.minimax.cn/mavis/api/v1/llm/v1/messages",
@@ -2590,7 +2872,8 @@
     "icon": "smart_toy",
     "website": "https://agent.minimax.io",
     "apiKeyUrl": null,
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://agent.minimax.io/mavis/api/v1/llm/v1/messages",
@@ -2658,7 +2941,8 @@
     "icon": "air",
     "website": "https://mistral.ai",
     "apiKeyUrl": "https://console.mistral.ai/api-keys",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.mistral.ai/v1/chat/completions",
@@ -2702,7 +2986,8 @@
     "textIcon": "MF",
     "icon": "hub",
     "apiKeyUrl": null,
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.xiaomimimo.com/api/free-ai/openai/chat",
@@ -2740,7 +3025,8 @@
     "icon": "change_history",
     "website": "https://morphllm.com",
     "apiKeyUrl": "https://morphllm.com",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.morphllm.com/v1/chat/completions",
@@ -2806,7 +3092,8 @@
     "icon": "auto_awesome",
     "website": "https://muse.ai",
     "apiKeyUrl": "https://dev.meta.ai",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.meta.ai/v1/chat/completions",
@@ -2918,7 +3205,8 @@
     "icon": "extension",
     "website": "https://nanobananaapi.ai",
     "apiKeyUrl": "https://nanobananaapi.ai/dashboard",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.nanobananaapi.ai/v1/chat/completions",
@@ -2947,7 +3235,8 @@
     "icon": "cloud",
     "website": "https://nebius.com",
     "apiKeyUrl": "https://studio.nebius.com/settings/api-keys",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.studio.nebius.ai/v1/chat/completions",
@@ -2988,7 +3277,8 @@
     "icon": "psychology",
     "website": "https://nousresearch.com",
     "apiKeyUrl": "https://portal.nousresearch.com/api-keys",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://inference-api.nousresearch.com/v1/chat/completions",
@@ -3081,7 +3371,8 @@
     "icon": "developer_board",
     "website": "https://developer.nvidia.com/nim",
     "apiKeyUrl": "https://build.nvidia.com/settings/api-keys",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://integrate.api.nvidia.com/v1/chat/completions",
@@ -3139,7 +3430,8 @@
     "icon": "auto_awesome",
     "website": "https://platform.openai.com",
     "apiKeyUrl": "https://platform.openai.com/api-keys",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.openai.com/v1/chat/completions",
@@ -3264,7 +3556,8 @@
     "icon": "router",
     "website": "https://openrouter.ai",
     "apiKeyUrl": "https://openrouter.ai/settings/keys",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://openrouter.ai/api/v1/chat/completions",
@@ -3299,7 +3592,8 @@
     "icon": "search",
     "website": "https://www.perplexity.ai",
     "apiKeyUrl": "https://www.perplexity.ai/settings/api",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.perplexity.ai/chat/completions",
@@ -3341,7 +3635,8 @@
     "icon": "water_drop",
     "website": "https://poolside.ai",
     "apiKeyUrl": "https://platform.poolside.ai/api-keys",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://inference.poolside.ai/v1/chat/completions",
@@ -3383,7 +3678,8 @@
     "icon": "memory",
     "website": "https://sambanova.ai",
     "apiKeyUrl": "https://cloud.sambanova.ai/apis",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.sambanova.ai/v1/chat/completions",
@@ -3418,7 +3714,8 @@
     "icon": "cloud_queue",
     "website": "https://cloud.siliconflow.com",
     "apiKeyUrl": "https://cloud.siliconflow.com/account/ak",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.siliconflow.com/v1/chat/completions",
@@ -3518,7 +3815,8 @@
     "icon": "cloud",
     "website": "https://cloud.tencent.com/product/hunyuan",
     "apiKeyUrl": "https://console.cloud.tencent.com/hunyuan/api-key",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.hunyuan.cloud.tencent.com/v1/chat/completions",
@@ -3558,7 +3856,8 @@
     "icon": "group_work",
     "website": "https://www.together.ai",
     "apiKeyUrl": "https://api.together.xyz/settings/api-keys",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.together.xyz/v1/chat/completions",
@@ -3607,7 +3906,8 @@
     "icon": "anchor",
     "website": "https://tokenharbor.ai",
     "apiKeyUrl": "https://tokenharbor.ai/dashboard",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://tokenharbor.ai/v1/chat/completions",
@@ -3666,7 +3966,8 @@
     "icon": "hub",
     "website": "https://www.tokenrouter.com",
     "apiKeyUrl": "https://www.tokenrouter.com",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.tokenrouter.com/v1/chat/completions",
@@ -3796,7 +4097,8 @@
     "icon": "shield",
     "website": "https://venice.ai",
     "apiKeyUrl": "https://venice.ai/settings/api",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.venice.ai/api/v1/chat/completions",
@@ -3865,7 +4167,8 @@
     "icon": "deployed_code",
     "website": "https://vercel.com/ai-gateway",
     "apiKeyUrl": "https://vercel.com/dashboard/~/ai-gateway",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://ai-gateway.vercel.sh/v1/chat/completions",
@@ -3902,7 +4205,8 @@
     "icon": "cloud",
     "website": "https://ark.cn-beijing.volces.com",
     "apiKeyUrl": "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions",
@@ -3971,7 +4275,8 @@
     "icon": "auto_awesome",
     "website": "https://x.ai",
     "apiKeyUrl": "https://console.x.ai",
-    "deprecated": false
+    "deprecated": false,
+    "deprecationNotice": null
    },
    "transport": {
     "baseUrl": "https://api.x.ai/v1/chat/completions",

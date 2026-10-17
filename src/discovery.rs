@@ -53,9 +53,9 @@ pub async fn auto_candidates(
 /// documented free models it lacks.
 pub async fn opencode_free(state: &AppState) -> Vec<String> {
     const KEY: &str = "opencode:free";
-    if state.registry.get(opencode::ID).is_none() {
+    let Some(url) = state.registry.get(opencode::ID).and_then(opencode::models_url) else {
         return Vec::new();
-    }
+    };
     let cached = state.model_cache.lock().get(KEY).cloned();
     if let Some((at, list)) = cached {
         if at.elapsed() < if list.is_empty() { TTL_ERR } else { TTL_OK } {
@@ -65,14 +65,14 @@ pub async fn opencode_free(state: &AppState) -> Vec<String> {
     let fetched = async {
         let resp = state
             .http
-            .get(opencode::MODELS_URL)
+            .get(&url)
             .header("Authorization", "Bearer public")
             .header("User-Agent", opencode::USER_AGENT)
             .timeout(TIMEOUT)
             .send()
             .await?;
         if !resp.status().is_success() {
-            bail!("{} answered {}", opencode::MODELS_URL, resp.status());
+            bail!("{url} answered {}", resp.status());
         }
         Ok::<_, anyhow::Error>(opencode::free_models(parse_ids(&resp.json::<Value>().await?)))
     };

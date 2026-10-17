@@ -19,8 +19,8 @@ use sha2::{Digest, Sha256};
 use crate::providers::{Format, Provider, Transport};
 
 pub const ID: &str = "opencode";
-/// The free model list (upstream `modelsFetcher`).
-pub const MODELS_URL: &str = "https://opencode.ai/zen/v1/models";
+/// Chat endpoint path; the provider's base URL is the host root.
+const CHAT_PATH: &str = "/inference/v1/chat/completions";
 /// OpenCode v2 UA shape; the v1 "opencode/1.18.x" form is rejected with 403 FreeTierError.
 pub const USER_AGENT: &str = "opencode/latest/2.0.26/cli";
 const MESSAGES_MODELS: [&str; 1] = ["union-alpha"];
@@ -121,12 +121,8 @@ pub fn patch(p: &mut Provider) {
     p.models.retain(|m| m.target_format.map_or(true, |f| f.supported()) && !is_muse_spark(&m.id));
     let Some(t) = p.transport.clone() else { return };
     let root = t.base_url.trim_end_matches('/').to_string();
-    let chat = Transport {
-        base_url: format!("{root}/inference/v1/chat/completions"),
-        format: Format::Openai,
-        force_stream: true,
-        ..t.clone()
-    };
+    let chat =
+        Transport { base_url: format!("{root}{CHAT_PATH}"), format: Format::Openai, force_stream: true, ..t.clone() };
     let messages = Transport {
         base_url: format!("{root}/inference/v1/messages"),
         format: Format::Claude,
@@ -135,6 +131,13 @@ pub fn patch(p: &mut Provider) {
     };
     p.transport = Some(chat.clone());
     p.transports = Some(vec![chat, messages]);
+}
+
+/// The free model list (upstream `modelsFetcher`) on the provider's host, normally
+/// `https://opencode.ai/zen/v1/models`.
+pub fn models_url(p: &Provider) -> Option<String> {
+    let chat = p.transport.as_ref()?.base_url.as_str();
+    Some(format!("{}/zen/v1/models", chat.strip_suffix(CHAT_PATH).unwrap_or(chat)))
 }
 
 pub fn transport_for<'a>(p: &'a Provider, model: &str) -> Option<&'a Transport> {
@@ -458,6 +461,69 @@ mod tests {
         assert_eq!(descending_hex(0, 1), "fffffffffffe");
     }
 
+    fn ids(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn free_models_keep_only_free_chat_models() {
+        let live = ids(&[
+            "big-pickle",
+            "gpt-5",
+            "claude-opus-5",
+            "minimax-m3-free",
+            "deepseek-v4-flash-free",
+            "muse-spark-1.2-contributor-free",
+            "muse-spark-1.3",
+            "jev-1.13-free",
+            "jev-1.13",
+            "glm-5.3-flash",
+            "glm-5.3-flash-free",
+        ]);
+        // Paid ids, the dead one, Responses-only Muse Spark and systemone-only Jev are dropped;
+        // the order of the live list is kept.
+        assert_eq!(free_models(live), ["big-pickle", "minimax-m3-free", "glm-5.3-flash-free"]);
+        assert!(free_models(Vec::new()).is_empty());
+    }
+
+    #[test]
+    fn documented_free_models_are_merged_after_the_live_list() {
+        let all = with_documented(ids(&["brand-new-free", "beam-free"]));
+        assert_eq!(all[..2], ["brand-new-free", "beam-free"]);
+        // beam-free is in both lists and appears once.
+        assert_eq!(all.len(), 2 + DOCUMENTED_FREE.len() - 1);
+        assert_eq!(all.iter().filter(|m| *m == "beam-free").count(), 1);
+        assert!(DOCUMENTED_FREE.iter().all(|id| all.contains(&id.to_string())));
+
+        // The live list unavailable: the documented list alone, in its own order.
+        assert_eq!(with_documented(Vec::new()), DOCUMENTED_FREE);
+    }
+
+    #[test]
+    fn documented_free_models_pass_the_live_filter() {
+        // Every documented id must be one the live filter would also accept, so the two
+        // lists never disagree about what is free and routable.
+        let documented = ids(&DOCUMENTED_FREE);
+        assert_eq!(free_models(documented.clone()), documented);
+        let mut unique = documented.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), documented.len());
+        assert!(documented.iter().all(|id| !is_messages_model(id)));
+    }
+
+    #[test]
+    fn models_url_follows_the_base_url() {
+        let reg = crate::providers::Registry::load(None).unwrap();
+        let Some(base) = reg.get(ID) else { return };
+        let mut p = base.clone();
+        let t = p.transport.as_mut().unwrap();
+        t.base_url = "http://127.0.0.1:9/inference/v1/chat/completions".into();
+        assert_eq!(models_url(&p).as_deref(), Some("http://127.0.0.1:9/zen/v1/models"));
+        p.transport = None;
+        assert_eq!(models_url(&p), None);
+    }
+
     #[test]
     fn headers_and_models() {
         let mut client = HeaderMap::new();
@@ -476,26 +542,13 @@ mod tests {
         assert!(is_messages_model("union-alpha(high)"));
         assert!(is_muse_spark("muse-spark-1.3-contributor-free"));
         assert!(!is_muse_spark("musespark2"));
-        let ids = [
-            "big-pickle",
-            "gpt-5",
-            "minimax-m3-free",
-            "deepseek-v4-flash-free",
-            "muse-spark-1.2-contributor-free",
-            "jev-1.13-free",
-        ];
-        assert_eq!(free_models(ids.map(String::from).to_vec()), ["big-pickle", "minimax-m3-free"]);
-        let all = with_documented(vec!["minimax-m3-free".into(), "beam-free".into()]);
-        assert_eq!(all[..2], ["minimax-m3-free", "beam-free"]);
-        assert_eq!(all.len(), 2 + DOCUMENTED_FREE.len() - 1);
-        assert!(DOCUMENTED_FREE.iter().all(|id| all.iter().any(|m| m == id)));
-
         let reg = crate::providers::Registry::load(None).unwrap();
         if let Some(p) = reg.get(ID) {
             assert!(p.no_auth);
             assert!(p.models.iter().all(|m| !is_muse_spark(&m.id)));
             let t = p.transport_for(Format::Claude, "big-pickle").unwrap();
             assert_eq!(t.base_url, "https://opencode.ai/inference/v1/chat/completions");
+            assert_eq!(models_url(p).as_deref(), Some("https://opencode.ai/zen/v1/models"));
             assert!(t.force_stream);
             assert_eq!(p.transport_for(Format::Openai, "union-alpha").unwrap().format, Format::Claude);
         }

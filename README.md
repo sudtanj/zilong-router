@@ -150,9 +150,15 @@ Pages, matching upstream's sidebar:
 - **Usage**: Today / 24h / 7D / 30D / 60D / All periods, overview cards, providers and
   recent requests, tokens / requests / cost chart, provider and model breakdowns, and
   the grouped, sortable table by model, account, API key or endpoint in costs or tokens.
-- **Settings**: Local Mode card with theme switcher and database path, Security
+- **Console Log** (Debug): the last 200 lines of the router log, refreshed every 1.5s
+  (polled rather than upstream's SSE stream), coloured by level, with *Clear*. Every
+  answered request is logged as `endpoint provider/model via account -> status in Nms`.
+- **Settings**: Local Mode card with theme switcher, a Database card (storage mode,
+  location, size and, with Turso, online / offline / connecting, last sync, last error
+  and a *Check connection* button that runs a query on Turso), Security
   (require login, require API key, password), Routing Strategy (round robin, sticky
-  limit), logout.
+  limit), logout. The sidebar foot shows the database state at all times (refreshed
+  every 30s) and links to the Database card.
 
 Upstream features that mini-router does not implement are left out of the sidebar
 rather than shown dead: Combos, Quota Tracker, Token Saver, CLI Tools, Media

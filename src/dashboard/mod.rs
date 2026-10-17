@@ -178,6 +178,8 @@ pub fn routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/settings", get(api::settings).patch(api::patch_settings))
         .route("/auto", get(api::auto_preview))
         .route("/test-models", post(api::test_models))
+        .route("/database", get(api::database))
+        .route("/console-logs", get(api::console_logs).delete(api::clear_console_logs))
         .route("/token-saver", get(api::token_saver))
         .route("/password", post(api::change_password))
         .route("/usage", get(api::usage))

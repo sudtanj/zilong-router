@@ -345,3 +345,15 @@ table.recent .dot{display:block;width:6px;height:6px;border-radius:50%}
   table.ut th,table.ut td{padding:10px 12px}
 }
 .lvl{padding:6px 12px;border-radius:6px;font-size:12px;font-weight:500;border:1px solid var(--border);color:var(--text-muted);background:transparent;transition:all .15s}.lvl:hover{background:var(--surface-2)}.lvl.on{background:var(--primary);border-color:var(--primary);color:#fff}
+/* database indicator (sidebar foot) */
+.dbstat{display:flex;align-items:center;gap:8px;margin:8px 16px 16px;padding:8px 12px;border-radius:8px;border:1px solid var(--border-subtle);font-size:12px;font-weight:500;color:var(--text-muted)}
+.dbstat:hover{background:var(--surface-2);color:var(--text)}
+.dbstat i{width:8px;height:8px;border-radius:50%;flex:none;background:#a3a3a3}
+.dbstat.success i{background:#22c55e;box-shadow:0 0 0 3px rgba(34,197,94,.2)}
+.dbstat.warning i{background:#eab308;box-shadow:0 0 0 3px rgba(234,179,8,.2)}
+.dbstat.error i{background:#ef4444;box-shadow:0 0 0 3px rgba(239,68,68,.2)}
+.dbstat .ms{margin-left:auto}
+/* console log (upstream ConsoleLogClient) */
+.console{background:#000;border-radius:0 0 14px 14px;padding:16px;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;height:calc(100vh - 220px);overflow-y:auto;white-space:pre-wrap;word-break:break-word;color:#4ade80}
+.console .l-WARN{color:#facc15}.console .l-ERROR{color:#f87171}.console .l-INFO{color:#60a5fa}.console .l-DEBUG,.console .l-TRACE{color:#c084fc}
+.card.flush{padding:0;overflow:hidden}

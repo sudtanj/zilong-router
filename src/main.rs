@@ -7,6 +7,7 @@
 mod auth;
 mod cli;
 mod config;
+mod console_log;
 mod dashboard;
 mod db;
 mod discovery;
@@ -45,6 +46,7 @@ fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(cfg.log_level.clone())))
         .with_target(false)
+        .with_writer(|| console_log::Tee)
         .compact()
         .init();
 

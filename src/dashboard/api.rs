@@ -63,6 +63,63 @@ pub async fn session(State(state): S, ConnectInfo(peer): ConnectInfo<SocketAddr>
     }))
 }
 
+// ----- database & console log ------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct DatabaseQuery {
+    /// Round trip to Turso now instead of only reporting the last sync.
+    #[serde(default)]
+    ping: bool,
+}
+
+/// Where the data lives and, with Turso, whether the mirror is reachable.
+pub async fn database(State(state): S, Query(q): Query<DatabaseQuery>) -> Json<Value> {
+    let cfg = &state.cfg;
+    let size =
+        state.db.rows("SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()", &[]).ok().and_then(
+            |rows| match rows.first().and_then(|r| r.first()) {
+                Some(rusqlite::types::Value::Integer(n)) => Some(*n),
+                _ => None,
+            },
+        );
+    let mut turso = Value::Null;
+    if let Some(host) = crate::turso::host(cfg) {
+        let status = state.turso.lock().clone();
+        turso = serde_json::to_value(status).unwrap_or_default();
+        turso["host"] = json!(host);
+        turso["syncSecs"] = json!(cfg.turso_sync_secs.max(5));
+        if q.ping {
+            turso["ping"] = match crate::turso::ping(cfg).await {
+                Ok(ms) => json!({"ok": true, "latencyMs": ms}),
+                Err(e) => json!({"ok": false, "error": format!("{e:#}")}),
+            };
+        }
+    }
+    Json(json!({
+        "mode": if cfg.turso_only { "turso" } else if turso.is_null() { "local" } else { "mirror" },
+        "path": (!cfg.turso_only).then(|| cfg.db_path().display().to_string()),
+        "sizeBytes": size,
+        "usageKeepDays": cfg.usage_keep_days(),
+        "turso": turso,
+    }))
+}
+
+#[derive(Deserialize)]
+pub struct ConsoleQuery {
+    #[serde(default)]
+    after: u64,
+}
+
+pub async fn console_logs(Query(q): Query<ConsoleQuery>) -> Json<Value> {
+    let (lines, last, reset) = crate::console_log::since(q.after);
+    Json(json!({"lines": lines, "last": last, "reset": reset}))
+}
+
+pub async fn clear_console_logs() -> Json<Value> {
+    crate::console_log::clear();
+    Json(json!({"success": true}))
+}
+
 #[derive(Deserialize)]
 pub struct LoginBody {
     password: String,

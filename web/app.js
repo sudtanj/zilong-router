@@ -127,7 +127,33 @@ $$('#nav a').forEach((a) => (a.onclick = () => document.body.classList.remove('n
 // ----- auth -------------------------------------------------------------------------
 let session = {};
 function showLogin() { $('#app').classList.add('hidden'); $('#login').classList.remove('hidden'); $('#login-password').focus(); }
-function showApp() { $('#login').classList.add('hidden'); $('#app').classList.remove('hidden'); }
+// ----- database indicator (sidebar foot) -------------------------------------------
+function dbHealth(d) {
+  const t = d.turso;
+  if (!t) return {cls: 'success', label: 'SQLite · local file', badge: 'Local', hint: d.path || ''};
+  const where = d.mode === 'turso' ? 'Turso' : 'Turso mirror';
+  if (t.online === true) return {cls: 'success', label: `${where} · online`, badge: 'Online', hint: `${t.host} · last sync ${relTime(t.lastOkAt).toLowerCase()}`};
+  if (t.online === false) return {cls: 'error', label: `${where} · offline`, badge: 'Offline', hint: t.lastError || t.host};
+  return {cls: 'warning', label: `${where} · connecting`, badge: 'Connecting', hint: t.host};
+}
+function paintDbStat(d) {
+  const el = $('#dbstat'), h = dbHealth(d);
+  el.className = 'dbstat ' + h.cls; el.title = h.hint;
+  el.innerHTML = `<i></i><span class="truncate">${esc(h.label)}</span>${ms('database', 16)}`;
+}
+async function refreshDbStat() {
+  try { paintDbStat(await get('/database')); }
+  catch (e) {
+    if (e.message === 'login required') return;
+    const el = $('#dbstat'); el.className = 'dbstat error'; el.title = e.message;
+    el.innerHTML = `<i></i><span class="truncate">Router unreachable</span>${ms('database', 16)}`;
+  }
+}
+let dbTimer = null;
+function showApp() {
+  $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
+  refreshDbStat(); if (!dbTimer) dbTimer = setInterval(refreshDbStat, 30000);
+}
 $('#login-form').onsubmit = async (ev) => {
   ev.preventDefault();
   const btn = $('#login-btn'); btn.disabled = true; $('#login-error').textContent = '';
@@ -143,6 +169,7 @@ const PAGE_INFO = {
   providers: {title: 'Providers', description: 'Manage your AI provider connections', icon: 'dns'},
   usage: {title: 'Usage & Analytics', description: 'Monitor your API usage, token consumption, and request logs', icon: 'bar_chart'},
   'token-saver': {title: 'Token Saver', description: 'Compress prompts and outputs to save tokens', icon: 'savings'},
+  'console-log': {title: 'Console Log', description: 'Live server console output', icon: 'monitor'},
   profile: {title: 'Settings', description: 'Manage your preferences', icon: 'settings'},
 };
 const pages = {};
@@ -905,9 +932,67 @@ actions.valueMode = ({v}) => { valueMode = v; reload(); };
 actions.sort = ({f}) => { if (sortBy === f) sortOrder = sortOrder === 'asc' ? 'desc' : 'asc'; else { sortBy = f; sortOrder = 'asc'; } reload(); };
 actions.toggleGroup = ({k}) => { expanded.has(k) ? expanded.delete(k) : expanded.add(k); localStorage.setItem('usage-stats:expanded', JSON.stringify([...expanded])); reload(); };
 
+// ----- Console Log (upstream console-log/ConsoleLogClient.js) -----------------------
+// Polled every 1.5s with the sequence number of the newest line seen, instead of
+// upstream's SSE stream, so the board holds no connection open.
+const CONSOLE_MAX = 200;
+let consoleLines = [], consoleLast = 0;
+const logLine = (l) => `<div class="l-${(l.match(/\b(ERROR|WARN|INFO|DEBUG|TRACE)\b/) || [])[1] || 'LOG'}">${esc(l)}</div>`;
+const consoleHtml = () => consoleLines.length ? consoleLines.map(logLine).join('') : '<span class="muted">No console logs yet.</span>';
+async function pollConsole() {
+  const d = await get('/console-logs?after=' + consoleLast);
+  const box = $('#console'); if (!box) return;
+  if (!d.lines.length && !d.reset) { consoleLast = d.last; return; }
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  consoleLines = (d.reset ? d.lines : consoleLines.concat(d.lines)).slice(-CONSOLE_MAX);
+  consoleLast = d.last;
+  box.innerHTML = consoleHtml();
+  if (atBottom) box.scrollTop = box.scrollHeight;
+}
+pages['console-log'] = async () => {
+  const d = await get('/console-logs');
+  consoleLines = d.lines.slice(-CONSOLE_MAX); consoleLast = d.last;
+  setTimeout(() => { const box = $('#console'); if (box) box.scrollTop = box.scrollHeight; });
+  every(1500, () => pollConsole().catch(() => {}));
+  return `<div class="card flush">
+    <div class="row between gap2" style="padding:12px 16px 8px"><p class="xs muted">Last ${CONSOLE_MAX} lines of the router log</p>
+      <button class="btn sm outline" data-act="clearConsole">${ms('delete')}Clear</button></div>
+    <div class="console" id="console">${consoleHtml()}</div>
+  </div>`;
+};
+actions.clearConsole = async () => {
+  await del('/console-logs');
+  consoleLines = []; const box = $('#console'); if (box) box.innerHTML = consoleHtml();
+};
+
 // ----- Settings (upstream profile/page.js) ------------------------------------------
+const DB_MODE = {local: 'Local SQLite file', mirror: 'Local SQLite file, mirrored to Turso', turso: 'Turso (working copy kept in memory on this device)'};
+const fmtBytes = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+function dbCard(d) {
+  const t = d.turso, h = dbHealth(d);
+  const inset = (title, body) => `<div class="inset"><p class="medium">${title}</p>${body}</div>`;
+  const parts = [
+    `<div class="inset row between wrap gap2"><div><p class="medium">Storage</p><p class="sm muted">${esc(DB_MODE[d.mode] || d.mode)}</p></div><span class="badge ${h.cls}">${esc(h.badge)}</span></div>`,
+    inset('Database Location', `<p class="sm muted mono break">${esc(d.path || 'In memory: nothing is written to the SD card, Turso holds the durable copy')}</p>`),
+    inset('Size', `<p class="sm muted">${d.sizeBytes != null ? fmtBytes(d.sizeBytes) : '?'} · usage history kept ${d.usageKeepDays} days${t && d.mode === 'mirror' ? ' here (Turso keeps all of it)' : ''}</p>`),
+  ];
+  if (t) {
+    parts.push(inset('Turso', `<p class="sm muted mono break">${esc(t.host)}</p>
+      <p class="sm muted mt1">${t.lastOkAt ? `Last successful sync ${relTime(t.lastOkAt).toLowerCase()}${t.lastRoundMs != null && t.online ? ` (took ${t.lastRoundMs}ms)` : ''}` : 'Not synced yet'} · pushes every ${t.syncSecs}s</p>
+      ${t.online === false && !t.ready ? '<p class="sm warning mt1">Not connected since start-up: changes are held back until Turso answers.</p>' : ''}
+      ${t.online === false && t.lastError ? `<p class="sm danger mt1 break">${esc(t.lastError)}</p>` : ''}
+      ${t.ping ? `<p class="sm mt1 ${t.ping.ok ? 'success' : 'danger'}">${t.ping.ok ? `Reachable now · ${t.ping.latencyMs}ms round trip` : `Not reachable now: ${esc(t.ping.error)}`}</p>` : ''}`));
+  }
+  return parts.join('');
+}
+actions.pingDb = async () => {
+  const d = await get('/database?ping=1');
+  const card = $('#db-card'); if (card) card.innerHTML = dbCard(d);
+  paintDbStat(d);
+};
 pages.profile = async () => {
-  const s = await get('/settings'); settingsCache = s;
+  const [s, db] = await Promise.all([get('/settings'), get('/database')]); settingsCache = s;
+  paintDbStat(db);
   const rr = s.fallbackStrategy === 'round-robin';
   setTimeout(() => {
     const f = $('#pw-form'); if (!f) return;
@@ -928,9 +1013,13 @@ pages.profile = async () => {
         <div class="theme-seg">${['light', 'dark', 'system'].map((o) => `<button type="button" class="${theme.get() === o ? 'on' : ''}" data-act="setTheme" data-v="${o}">${ms(o === 'light' ? 'light_mode' : o === 'dark' ? 'dark_mode' : 'contrast', 18)}<span>${o}</span></button>`).join('')}</div>
       </div>
       <div class="col gap3 pt4 bt">
-        <div class="inset row between wrap gap2"><div><p class="medium">Database Location</p><p class="sm muted mono break">${esc(session.dbPath || '')}</p></div></div>
         <div class="inset row between wrap gap2"><div><p class="medium">Provider registry</p><p class="sm muted">9router ${esc(session.upstream?.upstreamVersion || '?')} · ${esc((session.upstream?.upstreamCommit || '').slice(0, 8))} · synced ${esc((session.upstream?.generatedAt || '').slice(0, 10))}</p></div></div>
       </div>
+    </div>
+
+    <div class="card">
+      <div class="row between wrap gap3 mb4"><div class="row gap3"><div class="icon-tile p tint-green">${ms('database', 20)}</div><h3 class="ct">Database</h3></div>${db.turso ? `<button class="btn sm outline" data-act="pingDb" title="Run a query on Turso now">${ms('network_check')}Check connection</button>` : ''}</div>
+      <div class="col gap3" id="db-card">${dbCard(db)}</div>
     </div>
 
     <div class="card">
@@ -963,7 +1052,7 @@ pages.profile = async () => {
     <div class="row gap2 wrap">
       <button class="btn outline full" data-act="logout" style="flex:1">${ms('logout')}Logout</button>
     </div>
-    <div class="center xs muted" style="padding:16px 0"><p>mini-router v${esc(session.version || '')}</p><p class="mt1">Local Mode - All data stored on your machine</p></div>
+    <div class="center xs muted" style="padding:16px 0"><p>mini-router v${esc(session.version || '')}</p><p class="mt1">${db.mode === 'local' ? 'Local Mode - All data stored on your machine' : 'Data stored on your machine and on Turso'}</p></div>
   </div></div>`;
 };
 actions.setTheme = ({v}) => { theme.set(v); $$('.theme-seg button').forEach((b) => b.classList.toggle('on', b.dataset.v === v)); };

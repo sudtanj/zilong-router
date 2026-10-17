@@ -14,10 +14,11 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 use rusqlite::types::Value as SqlValue;
+use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::config::Config;
@@ -78,6 +79,60 @@ const USAGE_COLS: &[&str] = &[
 
 /// Statements per HTTP round trip.
 const CHUNK: usize = 200;
+
+/// Mirror health for the dashboard, updated after every connect and push.
+#[derive(Default, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Status {
+    /// Start-up restore succeeded, so changes are being pushed.
+    pub ready: bool,
+    /// Outcome of the latest connect or push; `None` before the first one.
+    pub online: Option<bool>,
+    /// Unix milliseconds.
+    pub last_ok_at: Option<i64>,
+    pub last_attempt_at: Option<i64>,
+    pub last_error: Option<String>,
+    pub last_round_ms: Option<u64>,
+}
+
+fn record(state: &AppState, ready: bool, started: Instant, res: &Result<()>) {
+    let now = (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64;
+    let mut s = state.turso.lock();
+    s.ready = ready;
+    s.last_attempt_at = Some(now);
+    s.last_round_ms = Some(started.elapsed().as_millis() as u64);
+    match res {
+        Ok(()) => {
+            s.online = Some(true);
+            s.last_ok_at = Some(now);
+            s.last_error = None;
+        }
+        Err(e) => {
+            s.online = Some(false);
+            s.last_error = Some(format!("{e:#}"));
+        }
+    }
+}
+
+/// Host of the configured database (never the token), if the mirror is configured.
+pub fn host(cfg: &Config) -> Option<String> {
+    let url = cfg.turso_url.as_deref()?.trim();
+    if url.is_empty() || cfg.turso_token.as_deref().map_or(true, |t| t.trim().is_empty()) {
+        return None;
+    }
+    let rest = url.split_once("://").map_or(url, |(_, r)| r);
+    Some(rest.split('/').next().unwrap_or(rest).to_string())
+}
+
+/// Round trip a `SELECT 1` now; returns the latency in milliseconds.
+pub async fn ping(cfg: &Config) -> Result<u64> {
+    let remote = Turso::from_config(cfg).ok_or_else(|| anyhow!("Turso is not configured"))?;
+    let started = Instant::now();
+    tokio::time::timeout(Duration::from_secs(10), remote.query("SELECT 1", &[]))
+        .await
+        .map_err(|_| anyhow!("no answer within 10s"))??;
+    Ok(started.elapsed().as_millis() as u64)
+}
 
 pub struct Turso {
     http: reqwest::Client,
@@ -337,18 +392,20 @@ impl Mirror {
     /// Pushing is held back until this succeeds once: pushing an unrestored (blank)
     /// local database would wipe the copy on Turso.
     async fn connect(&mut self, state: &AppState) {
+        let started = Instant::now();
         let res = async {
             self.remote.ensure_schema().await?;
             self.restore_if_blank(state).await
         }
         .await;
-        match res {
+        match &res {
             Ok(()) => {
                 self.ready = true;
                 tracing::info!("turso: connected, mirroring every {}s", state.cfg.turso_sync_secs);
             }
             Err(e) => tracing::warn!("turso: not connected yet, pushes paused: {e:#}"),
         }
+        record(state, self.ready, started, &res);
     }
 }
 
@@ -364,9 +421,12 @@ pub async fn sync_loop(state: Arc<AppState>, shared: Shared) {
             mirror.connect(&state).await;
             continue;
         }
-        if let Err(e) = mirror.round(&state).await {
+        let started = Instant::now();
+        let res = mirror.round(&state).await;
+        if let Err(e) = &res {
             tracing::warn!("turso sync failed: {e:#}");
         }
+        record(&state, true, started, &res);
     }
 }
 

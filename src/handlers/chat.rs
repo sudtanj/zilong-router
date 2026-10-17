@@ -392,6 +392,15 @@ async fn attempt(
         {
             Ok(resp) => {
                 router::mark_success(&state, &conn, &resolved.model);
+                tracing::info!(
+                    "{endpoint} {}/{} via {} -> {} in {}ms{}",
+                    provider.id,
+                    resolved.model,
+                    conn.label(),
+                    resp.status().as_u16(),
+                    started.elapsed().as_millis(),
+                    if client_stream { " (stream)" } else { "" }
+                );
                 let ctx = ReqCtx {
                     state: state.clone(),
                     provider: provider.id.clone(),

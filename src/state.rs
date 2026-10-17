@@ -26,6 +26,8 @@ pub struct AppState {
     pub rr: Mutex<HashMap<String, RoundRobin>>,
     /// Live `/models` lists for accounts without a catalogue (see `discovery`).
     pub model_cache: crate::discovery::Cache,
+    /// Mirror health shown on the dashboard (see `turso::Status`).
+    pub turso: Mutex<crate::turso::Status>,
     pub started_at: Instant,
 }
 
@@ -65,6 +67,7 @@ impl AppState {
             session_secret,
             rr: Mutex::new(HashMap::new()),
             model_cache: Mutex::new(HashMap::new()),
+            turso: Mutex::new(Default::default()),
             started_at: Instant::now(),
         })
     }

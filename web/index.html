@@ -12,7 +12,7 @@
 <link rel="stylesheet" href="/assets/style.css">
 <script>
 // Theme before first paint (same localStorage key semantics as upstream: light | dark | system).
-(function(){try{var t=localStorage.getItem('mr-theme')||'system';var m=window.matchMedia('(prefers-color-scheme: dark)').matches;if(t==='dark'||(t==='system'&&m))document.documentElement.classList.add('dark')}catch(e){}})();
+(function(){try{var t=localStorage.getItem('zr-theme')||'system';var m=window.matchMedia('(prefers-color-scheme: dark)').matches;if(t==='dark'||(t==='system'&&m))document.documentElement.classList.add('dark')}catch(e){}})();
 // Reveal icons once the symbol font is in, or after 3s so a blocked CDN never hides the UI.
 (function(){var r=document.documentElement,f=function(){r.classList.add('fonts-loaded')};if(document.fonts&&document.fonts.load){document.fonts.load('24px "Material Symbols Outlined"').then(f).catch(f);setTimeout(f,3000)}else{f()}})();
 </script>

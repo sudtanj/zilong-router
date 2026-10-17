@@ -178,8 +178,6 @@ async fn handle_inner(
         match attempt(&state, &req, &c, &label).await {
             Ok(mut resp) => {
                 if let Ok(v) = header::HeaderValue::from_str(&label) {
-                    // Old name kept for clients written before the rename.
-                    resp.headers_mut().insert("x-mini-router-model", v.clone());
                     resp.headers_mut().insert("x-zilong-router-model", v);
                 }
                 return Ok(resp);

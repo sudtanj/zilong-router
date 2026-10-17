@@ -1,9 +1,7 @@
 # zilong-router
 
-*Formerly mini-router.* Named after Zhao Yun (Zilong), the Three Kingdoms general who
-carried his charge safely through an entire army at Changban: every request gets through.
-The old names keep working: `MINI_ROUTER_*` environment variables, the `mini-router/auto`
-model and the `x-mini-router-model` response header (sent alongside `x-zilong-router-model`).
+Named after Zhao Yun (Zilong), the Three Kingdoms general who carried his charge safely
+through an entire army at Changban: every request gets through.
 
 A small, single-binary AI API router written in Rust. It is a re-implementation of
 [9router](https://github.com/decolua/9router) sized for a 1 GB ARM board such as the

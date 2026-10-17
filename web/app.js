@@ -103,10 +103,10 @@ const badge = (txt, variant = '', dot = false, size = 'sm') => `<span class="bad
 
 // ----- theme -----------------------------------------------------------------------
 const theme = {
-  get: () => localStorage.getItem('mr-theme') || 'system',
+  get: () => localStorage.getItem('zr-theme') || 'system',
   isDark: () => document.documentElement.classList.contains('dark'),
   set(t) {
-    localStorage.setItem('mr-theme', t);
+    localStorage.setItem('zr-theme', t);
     const dark = t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
     document.documentElement.classList.toggle('dark', dark);
     $('#theme-toggle .ms').textContent = dark ? 'light_mode' : 'dark_mode';

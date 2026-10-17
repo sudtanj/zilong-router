@@ -26,7 +26,7 @@ use sha2::Sha256;
 use crate::config::Config;
 use crate::state::AppState;
 
-const COOKIE: &str = "mr_session";
+const COOKIE: &str = "zr_session";
 const SESSION_TTL_SECS: i64 = 7 * 24 * 3600;
 
 const INDEX_HTML: &str = include_str!("../../web/index.html");
@@ -40,8 +40,7 @@ pub fn session_secret(cfg: &Config) -> String {
     }
     if cfg.turso_only {
         // No disk to persist a random secret on; derive a stable one from the Turso token.
-        // Keeps the pre-rename label: changing it would invalidate the stored password hash.
-        return sign(cfg.turso_token.as_deref().unwrap_or_default(), "mini-router-session-secret");
+        return sign(cfg.turso_token.as_deref().unwrap_or_default(), "zilong-router-session-secret");
     }
     let p = cfg.resolved_data_dir.join("jwt-secret");
     if let Ok(s) = std::fs::read_to_string(&p) {
@@ -126,7 +125,7 @@ pub fn set_cookie(token: &str) -> HeaderValue {
 }
 
 pub fn clear_cookie() -> HeaderValue {
-    HeaderValue::from_static("mr_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0")
+    HeaderValue::from_static("zr_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0")
 }
 
 /// Is this request allowed to use the admin API?
@@ -253,7 +252,7 @@ mod tests {
     #[test]
     fn cookie_parse() {
         let mut h = HeaderMap::new();
-        h.insert(header::COOKIE, "a=1; mr_session=tok.sig; b=2".parse().unwrap());
+        h.insert(header::COOKIE, "a=1; zr_session=tok.sig; b=2".parse().unwrap());
         assert_eq!(cookie_value(&h).as_deref(), Some("tok.sig"));
     }
 }

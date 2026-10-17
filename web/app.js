@@ -243,9 +243,10 @@ actions.copy = async ({text}, b) => {
 
 // ----- Donate (upstream DonateModal; channels are the maintainer's own) -----------
 const DONATE = [
-  {label: 'PayPal', icon: 'payments', color: '#0070BA', description: 'One-off donation via PayPal', url: 'https://www.paypal.me/sudtanj'},
+  {label: 'GitHub Sponsors', icon: 'favorite', color: '#DB61A2', description: 'Monthly or one-time sponsorship', url: 'https://github.com/sponsors/sudtanj'},
+  {label: 'PayPal', icon: 'payments', color: '#0070BA', description: 'One-time donation via PayPal', url: 'https://www.paypal.me/sudtanj'},
   {label: 'Bitcoin', icon: 'currency_bitcoin', color: '#F7931A', description: 'Send BTC to this address', address: '32Ja5bcaAAYXFjKCRmcYe3SM2RsSUCmXtQ'},
-  {label: 'GitHub', icon: 'favorite', color: '#DB61A2', description: 'Follow and star the projects', url: 'https://github.com/sudtanj'},
+  {label: 'Commercial license', icon: 'business_center', color: '#E56A4A', description: 'Using it in or for a business? Get a commercial license', url: 'https://www.linkedin.com/in/sudtanj/', cta: 'Contact'},
 ];
 const donateCard = (c) => `<div class="donate-card">
     <div class="donate-ico" style="background:${c.color}20;color:${c.color}">${ms(c.icon, 26)}</div>
@@ -253,11 +254,11 @@ const donateCard = (c) => `<div class="donate-card">
     <p class="xs muted center">${esc(c.description)}</p>
     ${c.address ? `<button type="button" class="donate-addr mono" data-act="copy" data-text="${esc(c.address)}" title="Copy address"><span class="lbl">${esc(c.address)}</span>${ms('content_copy', 14)}</button>
       <a class="btn sm donate-open" style="background:${c.color}" href="bitcoin:${esc(c.address)}">Open wallet${ms('open_in_new', 16)}</a>`
-    : `<a class="btn sm donate-open" style="background:${c.color}" href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">Open${ms('open_in_new', 16)}</a>`}
+    : `<a class="btn sm donate-open" style="background:${c.color}" href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">${esc(c.cta || 'Open')}${ms('open_in_new', 16)}</a>`}
   </div>`;
 actions.donate = () => openModal({
   title: 'Support zilong-router', size: 'wide',
-  body: `<p class="sm muted center" style="margin-bottom:24px">zilong-router is free and open source. If it saves you time or money, consider supporting its development.</p>
+  body: `<p class="sm muted center" style="margin-bottom:24px">zilong-router is free for personal use. If it saves you time or money, consider supporting its development.</p>
     <div class="donate-grid">${DONATE.map(donateCard).join('')}</div>`,
 });
 

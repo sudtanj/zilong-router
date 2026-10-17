@@ -365,7 +365,7 @@ html.dark .donate{color:#f472b6}
 @media(max-width:640px){.donate{padding:0 8px}.donate .lbl{display:none}}
 .modal.wide{max-width:768px}
 .donate-grid{display:grid;grid-template-columns:1fr;gap:16px}
-@media(min-width:640px){.donate-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(min-width:640px){.donate-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .donate-card{display:flex;flex-direction:column;align-items:center;gap:4px;padding:16px;border-radius:12px;border:1px solid var(--border);transition:border-color .15s}
 .donate-card:hover{border-color:rgba(236,72,153,.4)}
 .donate-ico{width:48px;height:48px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin-bottom:8px}

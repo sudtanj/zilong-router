@@ -1,5 +1,8 @@
 # zilong-router
 
+[![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-db61a2?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/sudtanj)
+[![PayPal](https://img.shields.io/badge/PayPal-donate-0070ba?logo=paypal&logoColor=white)](https://www.paypal.me/sudtanj)
+
 Named after Zhao Yun (赵云 / 趙雲), courtesy name Zilong (子龙 / 子龍), the Three Kingdoms
 general who carried his charge safely through an entire army at Changban (长坂): every
 request gets through.
@@ -307,10 +310,26 @@ Planned, roughly in order of interest. Nothing here is implemented yet.
 - Providers that need IDE-impersonation executors (Cursor, Windsurf, Kiro, Codex,
   Gemini CLI …).
 
+## Support the project
+
+zilong-router is free for personal use. If it saves you time or money, you can support it:
+
+- **[GitHub Sponsors](https://github.com/sponsors/sudtanj)**: monthly or one-time.
+- **[PayPal](https://www.paypal.me/sudtanj)**: one-time donation.
+- **Bitcoin**: `32Ja5bcaAAYXFjKCRmcYe3SM2RsSUCmXtQ`
+- A star on GitHub helps others find it.
+
+The same options are behind the **Donate** button in the dashboard.
+
+**Commercial use** (in or for a business, as a hosted service, or inside a paid product) needs
+a commercial license; see [License](#license). Paid setup help and custom features
+(providers, deployment on your hardware) are also available. Get in touch via
+[LinkedIn](https://www.linkedin.com/in/sudtanj/) or [GitHub](https://github.com/sudtanj).
+
 ## License
 
 **Source-available: free for personal use, paid for commercial use.**
 
 - Modifications and original code are under the [PolyForm Noncommercial License 1.0.0](LICENSE-POLYFORM-NONCOMMERCIAL.md), Copyright (c) 2026-present Sudono Tanjung. You can run, read and modify it for personal and other noncommercial use at no cost.
-- **Commercial use** (in or for a business, as a hosted service, or in a commercial product) needs a paid commercial license: contact [@sudtanj](https://github.com/sudtanj).
+- **Commercial use** (in or for a business, as a hosted service, or in a commercial product) needs a paid commercial license: contact [Sudono Tanjung on LinkedIn](https://www.linkedin.com/in/sudtanj/) or [@sudtanj](https://github.com/sudtanj).
 - The portions derived from [9router](https://github.com/decolua/9router) (Copyright (c) decolua and contributors) stay under the [MIT License](LICENSE-MIT), and versions published before the license change remain available under it. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

@@ -121,9 +121,12 @@ token by itself. **OpenCode Free** (`opencode`, `oc`) sends requests the way the
 v2 CLI does: its user agent and session headers, always streamed, with OpenCode's `read`
 and `shell` tools declared next to yours. The free tier refuses requests without them, and
 the model is told not to call them. Its free chat models (`-free` ids plus `big-pickle`)
-come from `opencode.ai/zen/v1/models` and show up in `/v1/models` and `auto`;
-`union-alpha` goes to its Anthropic endpoint. The Muse Spark models need the OpenAI
-Responses API and are left out. Local Ollama is best added as an OpenAI-compatible
+come from `opencode.ai/zen/v1/models`, plus every free chat model on OpenCode's pricing
+page that the live list leaves out (big-pickle, glm-5.3-flash, deepseek-v4.1-flash,
+space-bunny, beam, ll-alpha, longcat-2.5-preview, exo, mimo-v2.6-flash, mimo-v2.5,
+nemotron-3-ultra, nemotron-3.5-lightning and nemotron-3.5-super-vl), and show up in
+`/v1/models` and `auto`; `union-alpha` goes to its Anthropic endpoint. Left out: the Muse
+Spark models (OpenAI Responses API) and Jev (OpenCode's own `systemone` protocol). Local Ollama is best added as an OpenAI-compatible
 endpoint (`http://<host>:11434/v1`).
 
 Not ported, because they need a proprietary protocol or impersonate an IDE (see

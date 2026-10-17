@@ -26,6 +26,25 @@ pub const USER_AGENT: &str = "opencode/latest/2.0.26/cli";
 const MESSAGES_MODELS: [&str; 1] = ["union-alpha"];
 /// Free models whose id lacks the "-free" suffix.
 const KNOWN_FREE: [&str; 1] = ["big-pickle"];
+/// Free chat models from the opencode.ai/docs/zen pricing table (2026-10-17). Some are not in
+/// the live list, so both are offered (and these alone when it cannot be fetched).
+const DOCUMENTED_FREE: [&str; 13] = [
+    "big-pickle",
+    "glm-5.3-flash-free",
+    "deepseek-v4.1-flash-free",
+    "space-bunny-free",
+    "beam-free",
+    "ll-alpha-free",
+    "longcat-2.5-preview-free",
+    "exo-free",
+    "mimo-v2.6-flash-free",
+    "mimo-v2.5-free",
+    "nemotron-3-ultra-free",
+    "nemotron-3.5-lightning-free",
+    "nemotron-3.5-super-vl-free",
+];
+/// Free model families served by OpenCode's own `/inference/systemone` protocol, not chat.
+const OTHER_PROTOCOL: [&str; 1] = ["jev-"];
 /// Listed but answering "Model is unavailable" upstream.
 const DEAD_FREE: [&str; 1] = ["deepseek-v4-flash-free"];
 const SESSION_TTL: Duration = Duration::from_secs(2 * 60 * 60);
@@ -127,8 +146,18 @@ pub fn transport_for<'a>(p: &'a Provider, model: &str) -> Option<&'a Transport> 
 pub fn free_models(ids: Vec<String>) -> Vec<String> {
     ids.into_iter()
         .filter(|id| (id.ends_with("-free") || KNOWN_FREE.contains(&id.as_str())) && !DEAD_FREE.contains(&id.as_str()))
-        .filter(|id| !is_muse_spark(id))
+        .filter(|id| !is_muse_spark(id) && !OTHER_PROTOCOL.iter().any(|p| id.starts_with(p)))
         .collect()
+}
+
+/// The live free list followed by documented free models it lacks.
+pub fn with_documented(mut live: Vec<String>) -> Vec<String> {
+    for id in DOCUMENTED_FREE {
+        if !live.iter().any(|m| m == id) {
+            live.push(id.to_string());
+        }
+    }
+    live
 }
 
 // ----- Headers and sessions ---------------------------------------------------------
@@ -447,9 +476,19 @@ mod tests {
         assert!(is_messages_model("union-alpha(high)"));
         assert!(is_muse_spark("muse-spark-1.3-contributor-free"));
         assert!(!is_muse_spark("musespark2"));
-        let ids =
-            ["big-pickle", "gpt-5", "minimax-m3-free", "deepseek-v4-flash-free", "muse-spark-1.2-contributor-free"];
+        let ids = [
+            "big-pickle",
+            "gpt-5",
+            "minimax-m3-free",
+            "deepseek-v4-flash-free",
+            "muse-spark-1.2-contributor-free",
+            "jev-1.13-free",
+        ];
         assert_eq!(free_models(ids.map(String::from).to_vec()), ["big-pickle", "minimax-m3-free"]);
+        let all = with_documented(vec!["minimax-m3-free".into(), "beam-free".into()]);
+        assert_eq!(all[..2], ["minimax-m3-free", "beam-free"]);
+        assert_eq!(all.len(), 2 + DOCUMENTED_FREE.len() - 1);
+        assert!(DOCUMENTED_FREE.iter().all(|id| all.iter().any(|m| m == id)));
 
         let reg = crate::providers::Registry::load(None).unwrap();
         if let Some(p) = reg.get(ID) {

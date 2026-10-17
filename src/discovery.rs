@@ -49,7 +49,8 @@ pub async fn auto_candidates(
     crate::model::auto_candidates(&state.registry, aliases, connections, explicit, &custom, &discovered)
 }
 
-/// OpenCode Free's chat models, cached like account model lists.
+/// OpenCode Free's chat models: the live list (cached like account model lists) plus the
+/// documented free models it lacks.
 pub async fn opencode_free(state: &AppState) -> Vec<String> {
     const KEY: &str = "opencode:free";
     if state.registry.get(opencode::ID).is_none() {
@@ -58,7 +59,7 @@ pub async fn opencode_free(state: &AppState) -> Vec<String> {
     let cached = state.model_cache.lock().get(KEY).cloned();
     if let Some((at, list)) = cached {
         if at.elapsed() < if list.is_empty() { TTL_ERR } else { TTL_OK } {
-            return list;
+            return opencode::with_documented(list);
         }
     }
     let fetched = async {
@@ -83,7 +84,7 @@ pub async fn opencode_free(state: &AppState) -> Vec<String> {
         }
     };
     state.model_cache.lock().insert(KEY.to_string(), (Instant::now(), list.clone()));
-    list
+    opencode::with_documented(list)
 }
 
 /// Model ids an account's endpoint advertises (empty when it can't be listed).

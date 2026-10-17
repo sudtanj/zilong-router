@@ -61,6 +61,8 @@ pub struct Stats {
     pub bytes_before: usize,
     pub bytes_after: usize,
     pub hits: Vec<&'static str>,
+    /// Tool outputs looked at, compressed or not.
+    pub outputs: usize,
 }
 
 type Filter = (&'static str, fn(&str) -> String);
@@ -146,6 +148,7 @@ fn compress_string(s: &mut String, stats: &mut Stats) {
 pub fn compress_text(text: &str, stats: &mut Stats) -> Option<String> {
     let n = text.len();
     stats.bytes_before += n;
+    stats.outputs += 1;
     let keep = |stats: &mut Stats| {
         stats.bytes_after += n;
         None
@@ -1127,6 +1130,7 @@ mod tests {
         ]}]});
         let stats = compress_messages(&mut body);
         assert_eq!(stats.hits, vec!["grep"]);
+        assert_eq!(stats.outputs, 1);
         assert!(stats.bytes_after < stats.bytes_before);
         assert_ne!(body["messages"][0]["content"][0]["content"], json!(big));
         assert_eq!(body["messages"][0]["content"][1]["content"], json!(big));

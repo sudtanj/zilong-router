@@ -414,7 +414,7 @@ pages['token-saver'] = async () => {
       <div class="row wrap" style="gap:6px;justify-content:flex-end">${list.map((l) => `<button class="lvl ${l.id === cur ? 'on' : ''}" data-act="setLevel" data-key="${key}" data-level="${l.id}" title="${esc(l.desc)}">${esc(l.label)}</button>`).join('')}</div>
       <p class="xs" style="color:var(--primary)">${esc(list.find((l) => l.id === cur)?.desc || '')}</p></div>`;
   const row = (title, link, linkText, desc, key, on, extra = '', first = false) => `<div class="row between wrap ${first ? 'pb4' : 'pt4 mt4'}" style="gap:16px;${first ? '' : 'border-top:1px solid var(--border)'}">
-      <div class="grow" style="min-width:0">
+      <div class="grow" style="flex:1 1 220px;min-width:0">
         <p class="medium">${esc(title)} <a class="xs" href="${link}" target="_blank" rel="noreferrer" style="color:var(--primary);text-decoration:underline">(${esc(linkText)})</a></p>
         <p class="sm muted">${desc}</p>
       </div>
@@ -440,7 +440,13 @@ pages['token-saver'] = async () => {
         <div><p class="xs muted">Input saved</p><p class="xl semibold">${fmtBytes(st.bytesSaved)} <span class="sm muted">(${pct}%)</span></p></div>
         <div><p class="xs muted">≈ Tokens saved</p><p class="xl semibold">${st.tokensSaved.toLocaleString()}</p></div>
       </div>
-      <p class="xs muted mt2">RTK only; counters reset when the router restarts. Caveman and Ponytail savings show up as shorter answers on the Usage page.</p>
+      <div class="row wrap mt4" style="gap:24px">
+        <div><p class="xs muted">Requests with tool output</p><p class="xl semibold">${st.toolRequests}</p></div>
+        <div><p class="xs muted">Tool outputs checked</p><p class="xl semibold">${st.toolOutputs}</p></div>
+        <div><p class="xs muted">Caveman applied</p><p class="xl semibold">${st.caveman}</p></div>
+        <div><p class="xs muted">Ponytail applied</p><p class="xl semibold">${st.ponytail}</p></div>
+      </div>
+      <p class="xs muted mt2">Counters reset when the router restarts; dashboard model tests are not counted. RTK only compresses tool outputs over 500 B that match a filter (git, grep, find, ls, tree, build logs, long logs); plain chat has none. Caveman and Ponytail savings show up as shorter answers on the Usage page.</p>
     </div>
   </div>`;
 };

@@ -49,11 +49,21 @@ static REQUESTS: AtomicU64 = AtomicU64::new(0);
 static HITS: AtomicU64 = AtomicU64::new(0);
 static BYTES_BEFORE: AtomicU64 = AtomicU64::new(0);
 static BYTES_AFTER: AtomicU64 = AtomicU64::new(0);
+// Requests carrying tool output and outputs seen, compressed or not, so a 0 above
+// tells "nothing to compress" apart from "no filter matched".
+static TOOL_REQUESTS: AtomicU64 = AtomicU64::new(0);
+static TOOL_OUTPUTS: AtomicU64 = AtomicU64::new(0);
+static CAVEMAN: AtomicU64 = AtomicU64::new(0);
+static PONYTAIL: AtomicU64 = AtomicU64::new(0);
 
 pub fn stats() -> Value {
     let before = BYTES_BEFORE.load(Ordering::Relaxed);
     let after = BYTES_AFTER.load(Ordering::Relaxed);
     json!({
+        "toolRequests": TOOL_REQUESTS.load(Ordering::Relaxed),
+        "toolOutputs": TOOL_OUTPUTS.load(Ordering::Relaxed),
+        "caveman": CAVEMAN.load(Ordering::Relaxed),
+        "ponytail": PONYTAIL.load(Ordering::Relaxed),
         "requests": REQUESTS.load(Ordering::Relaxed),
         "hits": HITS.load(Ordering::Relaxed),
         "bytesBefore": before,
@@ -69,6 +79,10 @@ pub fn apply(body: &mut Value, target: Format, opts: &Options) {
     let mut flags: Vec<String> = Vec::new();
     if opts.rtk {
         let s = rtk::compress_messages(body);
+        if s.outputs > 0 {
+            TOOL_REQUESTS.fetch_add(1, Ordering::Relaxed);
+            TOOL_OUTPUTS.fetch_add(s.outputs as u64, Ordering::Relaxed);
+        }
         if !s.hits.is_empty() {
             REQUESTS.fetch_add(1, Ordering::Relaxed);
             HITS.fetch_add(s.hits.len() as u64, Ordering::Relaxed);
@@ -90,10 +104,12 @@ pub fn apply(body: &mut Value, target: Format, opts: &Options) {
     }
     if let Some(p) = &opts.caveman {
         inject_system(body, target, p);
+        CAVEMAN.fetch_add(1, Ordering::Relaxed);
         flags.push("CAVEMAN".into());
     }
     if let Some(p) = &opts.ponytail {
         inject_system(body, target, p);
+        PONYTAIL.fetch_add(1, Ordering::Relaxed);
         flags.push("PONYTAIL".into());
     }
     if !flags.is_empty() {

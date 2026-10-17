@@ -222,7 +222,9 @@ pub async fn ping(state: &Arc<AppState>, model: &str) -> Value {
     // 1024 tokens: reasoning models spend a small budget on thinking and answer nothing.
     let body =
         json!({"model": model, "max_tokens": 1024, "stream": false, "messages": [{"role": "user", "content": "hi"}]});
-    let headers = HeaderMap::new();
+    // Pings skip the token saver: nothing to compress, and they'd skew its counters.
+    let mut headers = HeaderMap::new();
+    headers.insert(crate::token_saver::OPT_OUT_HEADER, header::HeaderValue::from_static("off"));
     let caller = Caller::Local;
     let req = Req {
         caller: &caller,

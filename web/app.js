@@ -967,7 +967,6 @@ actions.clearConsole = async () => {
 
 // ----- Settings (upstream profile/page.js) ------------------------------------------
 const DB_MODE = {local: 'Local SQLite file', mirror: 'Local SQLite file, mirrored to Turso', turso: 'Turso (working copy kept in memory on this device)'};
-const fmtBytes = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
 function dbCard(d) {
   const t = d.turso, h = dbHealth(d);
   const inset = (title, body) => `<div class="inset"><p class="medium">${title}</p>${body}</div>`;

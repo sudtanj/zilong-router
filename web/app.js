@@ -990,6 +990,51 @@ actions.pingDb = async () => {
   const card = $('#db-card'); if (card) card.innerHTML = dbCard(d);
   paintDbStat(d);
 };
+// Import from 9router: pick a file, preview what it holds (dry run), then import.
+async function importUpload(file, q) {
+  const res = await fetch('/api/admin/import?' + new URLSearchParams(q), {method: 'POST', body: file, credentials: 'same-origin'});
+  if (res.status === 401) { showLogin(); throw new Error('login required'); }
+  let data = null; try { data = await res.json(); } catch (_) {}
+  if (!res.ok) throw new Error((data && data.error) || res.statusText);
+  return data;
+}
+actions.import9router = () => {
+  $('#menu').classList.add('hidden');
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = '.json,.sqlite,.db,application/json';
+  inp.onchange = () => { if (inp.files[0]) previewImport(inp.files[0]).catch(fail); };
+  inp.click();
+};
+async function previewImport(file) {
+  const m = openModal({title: 'Import from 9router', body: `<div class="loading" style="padding:24px"><span class="ms i32 spin">progress_activity</span></div><p class="center sm muted">Reading ${esc(file.name)}…</p>`});
+  let p;
+  try { p = await importUpload(file, {dryRun: true, providers: true, keys: true, settings: true}); }
+  catch (e) { m.close(); throw e; }
+  m.close();
+  const provs = Object.entries(p.byProvider || {}), skipped = Object.entries(p.skipped || {});
+  const opt = (name, label, desc, on, n) => `<label class="inset row gap3 start" style="cursor:pointer${n ? '' : ';opacity:.5'}"><input type="checkbox" name="${name}" ${on && n ? 'checked' : ''} ${n ? '' : 'disabled'} style="margin-top:3px"><div class="grow"><p class="medium">${label}</p><p class="sm muted">${desc}</p></div></label>`;
+  const nothing = !p.connections && !p.keys && !p.aliases && !p.customModels && !p.settings;
+  openModal({
+    title: 'Import from 9router',
+    body: `<p class="sm muted mb4">${esc(file.name)} (${esc(p.format)}). Entries are added or updated by id; nothing already here is deleted.</p>
+      <div class="col gap3">
+        ${opt('providers', `Providers: ${p.connections} account${p.connections === 1 ? '' : 's'}`, `${provs.length ? provs.map(([k, n]) => `${esc(k)} ×${n}`).join(', ') : 'none'}${p.customModels || p.aliases ? ` · ${p.customModels} custom model${p.customModels === 1 ? '' : 's'}, ${p.aliases} alias${p.aliases === 1 ? '' : 'es'}` : ''}`, true, p.connections + p.customModels + p.aliases)}
+        ${opt('keys', `API keys: ${p.keys}`, 'Clients keep working with their existing keys.', true, p.keys)}
+        ${opt('settings', `Settings: ${p.settings} value${p.settings === 1 ? '' : 's'}`, 'Routing strategy, sticky limit, per-provider overrides and the like. The dashboard password and Require login stay as they are here.', false, p.settings)}
+        ${skipped.length ? `<div class="warn-box">${ms('info', 16)}<p class="grow sm">Not imported, mini-router does not support these providers: ${skipped.map(([k, n]) => `${esc(k)} ×${n}`).join(', ')}.</p></div>` : ''}
+      </div>`,
+    footer: nothing ? '<button type="button" class="btn ghost full" data-close>Nothing to import</button>' : twoButtons('Import'),
+    onSubmit: async (f) => {
+      const q = {providers: f.providers.checked, keys: f.keys.checked, settings: f.settings.checked};
+      if (!q.providers && !q.keys && !q.settings) throw new Error('Pick at least one thing to import');
+      const r = await importUpload(file, q);
+      const done = [q.providers && `${r.connections} accounts`, q.keys && `${r.keys} API keys`, q.settings && r.settings && 'settings'].filter(Boolean);
+      notify('success', `Imported ${done.join(', ')}`, 'Import from 9router');
+      reload();
+    },
+  });
+}
+
 pages.profile = async () => {
   const [s, db] = await Promise.all([get('/settings'), get('/database')]); settingsCache = s;
   paintDbStat(db);
@@ -1020,6 +1065,16 @@ pages.profile = async () => {
     <div class="card">
       <div class="row between wrap gap3 mb4"><div class="row gap3"><div class="icon-tile p tint-green">${ms('database', 20)}</div><h3 class="ct">Database</h3></div>${db.turso ? `<button class="btn sm outline" data-act="pingDb" title="Run a query on Turso now">${ms('network_check')}Check connection</button>` : ''}</div>
       <div class="col gap3" id="db-card">${dbCard(db)}</div>
+    </div>
+
+    <div class="card">
+      <div class="row between wrap gap3 mb4"><div class="row gap3"><div class="icon-tile p tint-orange">${ms('move_to_inbox', 20)}</div><h3 class="ct">Import from 9router</h3></div><button class="btn sm secondary" data-act="import9router">${ms('upload_file')}Choose file</button></div>
+      <p class="sm muted">Bring provider accounts, custom endpoints and models, model aliases, API keys and optionally settings over from an old 9router install. You see what the file holds before anything is imported. Any of these works:</p>
+      <ul class="sm muted mt2" style="padding-left:20px;list-style:disc">
+        <li>the backup from 9router's <b>Settings → Download Backup</b> (<code>9router-backup-….json</code>)</li>
+        <li><code>~/.9router/db/data.sqlite</code> (stop 9router first so its last changes are in the file)</li>
+        <li><code>~/.9router/db.json</code> from older versions</li>
+      </ul>
     </div>
 
     <div class="card">

@@ -6,6 +6,7 @@
 //! loopback clients are let in without a password; everyone else must log in.
 
 pub mod api;
+pub mod import;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -179,6 +180,7 @@ pub fn routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/auto", get(api::auto_preview))
         .route("/test-models", post(api::test_models))
         .route("/database", get(api::database))
+        .route("/import", post(api::import_9router))
         .route("/console-logs", get(api::console_logs).delete(api::clear_console_logs))
         .route("/token-saver", get(api::token_saver))
         .route("/password", post(api::change_password))

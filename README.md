@@ -153,6 +153,13 @@ Pages, matching upstream's sidebar:
 - **Console Log** (Debug): the last 200 lines of the router log, refreshed every 1.5s
   (polled rather than upstream's SSE stream), coloured by level, with *Clear*. Every
   answered request is logged as `endpoint provider/model via account -> status in Nms`.
+- **Import from 9router** (Settings card, also in the header menu): upload the JSON from
+  9router's *Settings → Download Backup*, its `~/.9router/db/data.sqlite`, or a legacy
+  `~/.9router/db.json`. A preview lists the accounts per provider, API keys, custom
+  models, aliases and settings found, and which providers mini-router can't use (those
+  accounts are skipped). Rows are merged by id, so nothing here is deleted and importing
+  twice is harmless. Custom endpoints are converted to mini-router's form; the old
+  dashboard password and *Require login* are never imported.
 - **Settings**: Local Mode card with theme switcher, a Database card (storage mode,
   location, size and, with Turso, online / offline / connecting, last sync, last error
   and a *Check connection* button that runs a query on Turso), Security

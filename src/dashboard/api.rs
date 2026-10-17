@@ -120,6 +120,69 @@ pub async fn clear_console_logs() -> Json<Value> {
     Json(json!({"success": true}))
 }
 
+// ----- import from 9router -----------------------------------------------------------
+
+fn yes() -> bool {
+    true
+}
+
+#[derive(Deserialize)]
+pub struct ImportQuery {
+    #[serde(default, rename = "dryRun")]
+    dry_run: bool,
+    #[serde(default = "yes")]
+    providers: bool,
+    #[serde(default = "yes")]
+    keys: bool,
+    #[serde(default)]
+    settings: bool,
+}
+
+/// Upload cap: a 9router `data.sqlite` carries its usage history too.
+const MAX_IMPORT: usize = 512 << 20;
+
+/// Body: a 9router backup JSON, legacy `db.json` or `data.sqlite`. Streamed to a file
+/// in the data dir so a large database never sits in RAM.
+pub async fn import_9router(State(state): S, Query(q): Query<ImportQuery>, body: axum::body::Body) -> R {
+    use futures_util::StreamExt;
+    use std::io::Write;
+
+    use anyhow::Context;
+
+    let path = state.cfg.resolved_data_dir.join(format!("import-{}.tmp", uuid::Uuid::new_v4()));
+    let res = async {
+        let mut file = std::fs::File::create(&path).context("cannot write the upload to the data dir")?;
+        let mut stream = body.into_data_stream();
+        let mut total = 0usize;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.context("upload interrupted")?;
+            total += chunk.len();
+            if total > MAX_IMPORT {
+                anyhow::bail!("file larger than {} MB", MAX_IMPORT >> 20);
+            }
+            file.write_all(&chunk)?;
+        }
+        file.flush()?;
+        drop(file);
+        if total == 0 {
+            anyhow::bail!("empty file");
+        }
+        let (state, p) = (state.clone(), path.clone());
+        let opts =
+            super::import::Options { providers: q.providers, keys: q.keys, settings: q.settings, dry_run: q.dry_run };
+        tokio::task::spawn_blocking(move || {
+            let (payload, format) = super::import::read_payload(&p)?;
+            let mut summary = super::import::apply(&state, &payload, &opts)?;
+            summary["format"] = json!(format);
+            Ok::<_, anyhow::Error>(summary)
+        })
+        .await?
+    }
+    .await;
+    let _ = std::fs::remove_file(&path);
+    res.map(Json).map_err(|e| bad(format!("{e:#}")))
+}
+
 #[derive(Deserialize)]
 pub struct LoginBody {
     password: String,

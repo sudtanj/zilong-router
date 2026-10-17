@@ -165,7 +165,12 @@ Pages, matching upstream's sidebar:
   last error, unlock, edit, delete, toggle, per-provider round-robin) and the
   *Available Models* chips with copy and custom models, plus one *Test all* button that
   sends a short "hi" to every listed model (three at a time, 30s each at most) and shows
-  which work, their latency and the error of those that don't. *Add OpenAI Compatible* /
+  which work, their latency and the error of those that don't (with *Remove failed*).
+  *Clean up* runs the same test and removes every model that fails (rate-limited ones
+  are kept): models you added are deleted, catalogue ones are hidden from the page,
+  `/v1/models` and `auto` until *Restore*. *Refresh models* pulls the provider's live
+  model list (through its best account; OpenCode Free needs none), tests the models
+  the page doesn't list yet and adds the ones that answer. *Add OpenAI Compatible* /
   *Add Anthropic Compatible* create custom endpoints with a prefix.
 - **Usage**: Today / 24h / 7D / 30D / 60D / All periods, overview cards, providers and
   recent requests, tokens / requests / cost chart, provider and model breakdowns, and

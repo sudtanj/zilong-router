@@ -23,6 +23,8 @@ const CHAT_PATH: &str = "/inference/v1/chat/completions";
 struct Mock {
     /// `/zen/v1/models` ids; `None` answers 500.
     live: Option<Vec<&'static str>>,
+    /// Models the chat endpoint answers 404 for.
+    broken: Vec<&'static str>,
     model_requests: Arc<Mutex<Vec<HeaderMap>>>,
     chats: Arc<Mutex<Vec<(HeaderMap, Value)>>>,
 }
@@ -42,6 +44,9 @@ async fn chat(State(m): State<Mock>, headers: HeaderMap, body: axum::body::Bytes
     let body: Value = serde_json::from_slice(&body).expect("JSON request body");
     let model = body["model"].as_str().unwrap_or_default().to_string();
     m.chats.lock().unwrap().push((headers, body));
+    if m.broken.contains(&model.as_str()) {
+        return (StatusCode::NOT_FOUND, Json(json!({"error": {"message": "model not found"}}))).into_response();
+    }
     let chunk = |choices: Value, usage: Value| {
         let mut c = json!({"id": "chatcmpl-mock", "object": "chat.completion.chunk", "created": 0, "model": model, "choices": choices});
         if !usage.is_null() {
@@ -256,4 +261,68 @@ async fn documented_model_is_routed_to_the_free_chat_endpoint() {
             body["tools"].as_array().unwrap().iter().filter_map(|t| t["function"]["name"].as_str()).collect();
         assert!(tools.contains(&"read") && tools.contains(&"shell"), "{tools:?}");
     }
+}
+
+async fn admin(method: reqwest::Method, base: &str, path: &str, body: Option<Value>) -> Value {
+    let mut rb = reqwest::Client::new().request(method, format!("{base}/api/admin{path}"));
+    if let Some(b) = body {
+        rb = rb.json(&b);
+    }
+    let resp = rb.send().await.unwrap();
+    assert!(resp.status().is_success(), "{path}: {}", resp.status());
+    resp.json().await.unwrap()
+}
+
+async fn provider_models(base: &str, id: &str) -> Vec<String> {
+    let list = admin(reqwest::Method::GET, base, "/providers", None).await;
+    let p = list.as_array().unwrap().iter().find(|p| p["id"] == id).unwrap().clone();
+    p["models"].as_array().unwrap().iter().map(|m| m["id"].as_str().unwrap().to_string()).collect()
+}
+
+#[tokio::test]
+async fn clean_up_hides_failing_models_and_refresh_brings_them_back() {
+    use reqwest::Method;
+    let mock = Mock { live: Some(vec!["big-pickle"]), broken: vec!["exo-free"], ..Default::default() };
+    let router = start_router("cleanup", &start_mock(mock.clone()).await).await;
+    let base = router.base.as_str();
+
+    // Test all: the broken model fails, the other answers.
+    let res = admin(Method::POST, base, "/test-models", Some(json!({"models": ["oc/beam-free", "oc/exo-free"]}))).await;
+    assert_eq!((res["total"].as_u64(), res["ok"].as_u64()), (Some(2), Some(1)), "{res}");
+    let failed: Vec<&str> = res["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|r| r["ok"] != true)
+        .filter_map(|r| r["model"].as_str())
+        .collect();
+    assert_eq!(failed, ["oc/exo-free"]);
+
+    // Clean up: a listed (not custom) model is hidden from every list.
+    let lists = admin(Method::POST, base, "/models/oc/remove", Some(json!({"models": ["exo-free"]}))).await;
+    assert_eq!(lists["hidden"], json!(["exo-free"]));
+    assert_eq!(admin(Method::GET, base, "/models/oc/hidden", None).await, json!(["exo-free"]));
+    assert!(!model_ids(base).await.iter().any(|m| m == "oc/exo-free"));
+    assert!(!provider_models(base, "opencode").await.iter().any(|m| m == "exo-free"));
+    assert!(model_ids(base).await.iter().any(|m| m == "oc/beam-free"));
+
+    // Refresh: the live list is fetched again (not from the cache).
+    let before = mock.model_requests.lock().unwrap().len();
+    let live = admin(Method::POST, base, "/refresh-models", Some(json!({"provider": "opencode"}))).await;
+    assert_eq!(mock.model_requests.lock().unwrap().len(), before + 1);
+    let live: Vec<&str> = live["models"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+    assert!(live.contains(&"big-pickle") && live.contains(&"exo-free"), "{live:?}");
+
+    // Adding working models unhides listed ones and keeps the rest as custom models.
+    let lists =
+        admin(Method::POST, base, "/models/oc/add", Some(json!({"models": ["exo-free", "brand-new-free"]}))).await;
+    assert_eq!(lists, json!({"custom": ["brand-new-free"], "hidden": []}));
+    assert!(model_ids(base).await.iter().any(|m| m == "oc/exo-free"));
+
+    // Removing a custom model deletes it; Restore unhides everything.
+    let lists =
+        admin(Method::POST, base, "/models/oc/remove", Some(json!({"models": ["brand-new-free", "beam-free"]}))).await;
+    assert_eq!(lists, json!({"custom": [], "hidden": ["beam-free"]}));
+    assert_eq!(admin(Method::DELETE, base, "/models/oc/hidden", None).await, json!([]));
+    assert!(provider_models(base, "opencode").await.iter().any(|m| m == "beam-free"));
 }

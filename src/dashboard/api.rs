@@ -273,12 +273,17 @@ pub async fn providers(State(state): S) -> R {
     let conns = state.db.all_connections()?;
     // OpenCode Free's chat models come from a live list (cached).
     let opencode_free = crate::discovery::opencode_free(&state).await;
+    // Models removed on the provider page stay out of its list.
+    let hidden = state.db.kv_scope("hiddenModels")?;
     let models_of = |p: &crate::providers::Provider| {
-        let mut out: Vec<Value> = p.models.iter().map(|m| json!({"id": m.id, "name": m.name})).collect();
+        let mut out: Vec<(&str, &str)> = p.models.iter().map(|m| (m.id.as_str(), m.name.as_str())).collect();
         if p.id == crate::oauth::opencode::ID {
-            out.extend(opencode_free.iter().filter(|id| p.model(id).is_none()).map(|id| json!({"id": id, "name": id})));
+            out.extend(opencode_free.iter().filter(|id| p.model(id).is_none()).map(|id| (id.as_str(), id.as_str())));
         }
-        out
+        out.into_iter()
+            .filter(|(id, _)| !crate::model::is_hidden(&hidden, &[p.id.as_str(), p.alias.as_str()], id))
+            .map(|(id, name)| json!({"id": id, "name": name}))
+            .collect::<Vec<Value>>()
     };
     let mut list: Vec<Value> = state
         .registry
@@ -728,6 +733,117 @@ pub async fn delete_custom_model(State(state): S, Path((prefix, model)): Path<(S
     let value = json!(list);
     state.db.kv_set("customModels", &prefix, if list.is_empty() { None } else { Some(&value) })?;
     Ok(Json(json!(list)))
+}
+
+// ----- clean up / refresh a provider's model list --------------------------------
+//
+// Catalogue models can't be deleted, so removing one records it in kv scope
+// `hiddenModels` (keyed by prefix like `customModels`); added models that are hidden
+// come back, the rest become custom models.
+
+fn kv_list(db: &Db, scope: &str, key: &str) -> anyhow::Result<Vec<String>> {
+    Ok(db.kv_scope(scope)?.get(key).and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default())
+}
+
+fn kv_save(db: &Db, scope: &str, key: &str, list: &[String]) -> anyhow::Result<()> {
+    db.kv_set(scope, key, if list.is_empty() { None } else { Some(&json!(list)) })
+}
+
+#[derive(Deserialize)]
+pub struct ModelsBody {
+    models: Vec<String>,
+}
+
+fn model_ids(b: ModelsBody) -> Result<Vec<String>, AdminError> {
+    let mut out: Vec<String> = Vec::new();
+    for m in b.models.iter().map(|m| m.trim()).filter(|m| !m.is_empty()) {
+        if !out.iter().any(|x| x == m) {
+            out.push(m.to_string());
+        }
+    }
+    if out.is_empty() {
+        return Err(bad("no models given"));
+    }
+    Ok(out)
+}
+
+/// `{custom, hidden}` lists of a prefix after a change.
+fn model_lists(db: &Db, prefix: &str) -> R {
+    Ok(Json(json!({"custom": kv_list(db, "customModels", prefix)?, "hidden": kv_list(db, "hiddenModels", prefix)?})))
+}
+
+/// "Clean up": drop these models from the prefix's list (custom ones are deleted,
+/// catalogue and live ones hidden).
+pub async fn remove_models(State(state): S, Path(prefix): Path<String>, Json(b): Json<ModelsBody>) -> R {
+    let models = model_ids(b)?;
+    let mut custom = kv_list(&state.db, "customModels", &prefix)?;
+    let mut hidden = kv_list(&state.db, "hiddenModels", &prefix)?;
+    for m in models {
+        if let Some(i) = custom.iter().position(|c| c == &m) {
+            custom.remove(i);
+        } else if !hidden.contains(&m) {
+            hidden.push(m);
+        }
+    }
+    kv_save(&state.db, "customModels", &prefix, &custom)?;
+    kv_save(&state.db, "hiddenModels", &prefix, &hidden)?;
+    model_lists(&state.db, &prefix)
+}
+
+/// "Refresh models": put these (working) models on the prefix's list.
+pub async fn add_models(State(state): S, Path(prefix): Path<String>, Json(b): Json<ModelsBody>) -> R {
+    let models = model_ids(b)?;
+    let provider = state.registry.resolve_alias(&prefix).and_then(|id| state.registry.get(id));
+    // Listed anyway (catalogue or OpenCode Free's live list): only unhide those.
+    let listed: Vec<String> = match provider {
+        Some(p) if p.id == crate::oauth::opencode::ID => crate::discovery::opencode_free(&state).await,
+        _ => Vec::new(),
+    };
+    let mut custom = kv_list(&state.db, "customModels", &prefix)?;
+    let mut hidden = kv_list(&state.db, "hiddenModels", &prefix)?;
+    for m in models {
+        hidden.retain(|h| h != &m);
+        let known = provider.is_some_and(|p| p.model(&m).is_some()) || listed.contains(&m);
+        if !known && !custom.contains(&m) {
+            custom.push(m);
+        }
+    }
+    kv_save(&state.db, "customModels", &prefix, &custom)?;
+    kv_save(&state.db, "hiddenModels", &prefix, &hidden)?;
+    model_lists(&state.db, &prefix)
+}
+
+pub async fn hidden_models(State(state): S, Path(prefix): Path<String>) -> R {
+    Ok(Json(json!(kv_list(&state.db, "hiddenModels", &prefix)?)))
+}
+
+/// Restore every model removed from the prefix's list.
+pub async fn restore_hidden_models(State(state): S, Path(prefix): Path<String>) -> R {
+    state.db.kv_set("hiddenModels", &prefix, None)?;
+    Ok(Json(json!([])))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RefreshBody {
+    provider: String,
+    /// Custom endpoint account (its page lists only its own models).
+    node: Option<String>,
+}
+
+/// The provider's live model list, fetched now through its best active account.
+pub async fn refresh_models(State(state): S, Json(b): Json<RefreshBody>) -> R {
+    let conns = state.db.all_connections()?;
+    let conn = match b.node.as_deref().filter(|n| !n.is_empty()) {
+        Some(node) => Some(conns.iter().find(|c| c.id == node).ok_or_else(not_found)?),
+        None => {
+            conns.iter().filter(|c| c.is_active && c.provider == b.provider).min_by_key(|c| c.priority.unwrap_or(999))
+        }
+    };
+    let models = crate::discovery::refresh(&state, &b.provider, conn)
+        .await
+        .map_err(|e| AdminError(StatusCode::BAD_GATEWAY, format!("cannot list the models: {e}")))?;
+    Ok(Json(json!({"models": models})))
 }
 
 // ----- usage ---------------------------------------------------------------------

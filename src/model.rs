@@ -199,6 +199,25 @@ pub fn connection_prefix(c: &ProviderConnection) -> Option<&str> {
         .filter(|s| !s.is_empty())
 }
 
+/// Whether a model was removed on a provider page (kv scope `hiddenModels`, keyed
+/// like `customModels`): such models are left out of `/v1/models`, the dashboard and
+/// `auto`, but still answer when asked for by name.
+pub fn is_hidden(hidden: &serde_json::Map<String, Value>, keys: &[&str], model: &str) -> bool {
+    keys.iter().any(|k| custom_list(hidden, k).any(|m| m == model))
+}
+
+/// Keys a candidate's hidden models are stored under: the prefix of a pinned custom
+/// endpoint, else the provider's alias and id.
+pub fn hidden_keys<'a>(registry: &'a Registry, connections: &'a [ProviderConnection], r: &'a Resolved) -> Vec<&'a str> {
+    if let Some(id) = r.pinned_connection.as_deref() {
+        let c = connections.iter().find(|c| c.id == id);
+        return vec![c.and_then(connection_prefix).unwrap_or(&r.provider)];
+    }
+    let mut keys = vec![r.provider.as_str()];
+    keys.extend(registry.get(&r.provider).map(|p| p.alias.as_str()));
+    keys
+}
+
 fn custom_list<'a>(custom: &'a serde_json::Map<String, Value>, key: &str) -> impl Iterator<Item = String> + 'a {
     custom.get(key).and_then(Value::as_array).into_iter().flatten().filter_map(|m| m.as_str().map(str::to_string))
 }
@@ -287,5 +306,38 @@ mod tests {
         custom.insert(OPENAI_COMPATIBLE.into(), json!(["qwen"]));
         assert!(needs_live_models(&r, &conns, &custom).is_empty());
         assert_eq!(auto_candidates(&r, &aliases, &conns, &[], &custom, &HashMap::new())[0].model, "qwen");
+    }
+
+    #[test]
+    fn hidden_models_are_keyed_by_prefix_alias_or_id() {
+        let r = Registry::load(None).unwrap();
+        let mut hidden = serde_json::Map::new();
+        hidden.insert("oc".into(), json!(["big-pickle"]));
+        hidden.insert("myproxy".into(), json!(["llama3"]));
+        let oc = Resolved { provider: "opencode".into(), model: "big-pickle".into(), pinned_connection: None };
+        assert_eq!(hidden_keys(&r, &[], &oc), ["opencode", "oc"]);
+        assert!(is_hidden(&hidden, &hidden_keys(&r, &[], &oc), &oc.model));
+        assert!(!is_hidden(&hidden, &hidden_keys(&r, &[], &oc), "exo-free"));
+
+        let conn = ProviderConnection {
+            id: "node1".into(),
+            provider: OPENAI_COMPATIBLE.into(),
+            auth_type: "apikey".into(),
+            name: None,
+            email: None,
+            priority: Some(1),
+            is_active: true,
+            data: json!({"apiKey": "k", "providerSpecificData": {"prefix": "myproxy"}}),
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+        let conns = [conn];
+        let pinned = Resolved {
+            provider: OPENAI_COMPATIBLE.into(),
+            model: "llama3".into(),
+            pinned_connection: Some("node1".into()),
+        };
+        assert_eq!(hidden_keys(&r, &conns, &pinned), ["myproxy"]);
+        assert!(is_hidden(&hidden, &hidden_keys(&r, &conns, &pinned), "llama3"));
     }
 }

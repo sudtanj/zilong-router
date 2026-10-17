@@ -46,17 +46,44 @@ pub async fn auto_candidates(
             }
         }
     }
-    crate::model::auto_candidates(&state.registry, aliases, connections, explicit, &custom, &discovered)
+    let mut out = crate::model::auto_candidates(&state.registry, aliases, connections, explicit, &custom, &discovered);
+    // Models removed on a provider page; an explicit list is the caller's own choice.
+    if explicit.is_empty() {
+        let hidden = state.db.kv_scope("hiddenModels").unwrap_or_default();
+        out.retain(|r| {
+            !crate::model::is_hidden(&hidden, &crate::model::hidden_keys(&state.registry, connections, r), &r.model)
+        });
+    }
+    out
 }
+
+/// "Refresh models" on a provider page: the provider's live model list, fetched now
+/// (the cache is updated too). OpenCode Free needs no account; anything else lists
+/// through `conn`.
+pub async fn refresh(
+    state: &AppState,
+    provider: &str,
+    conn: Option<&ProviderConnection>,
+) -> anyhow::Result<Vec<String>> {
+    if provider == opencode::ID {
+        state.model_cache.lock().remove(OPENCODE_FREE_KEY);
+        return Ok(opencode_free(state).await);
+    }
+    let conn = conn.ok_or_else(|| anyhow!("add an account first: its endpoint lists the models"))?;
+    let list = fetch(state, conn).await?;
+    state.model_cache.lock().insert(conn.id.clone(), (Instant::now(), list.clone()));
+    Ok(list)
+}
+
+const OPENCODE_FREE_KEY: &str = "opencode:free";
 
 /// OpenCode Free's chat models: the live list (cached like account model lists) plus the
 /// documented free models it lacks.
 pub async fn opencode_free(state: &AppState) -> Vec<String> {
-    const KEY: &str = "opencode:free";
     let Some(url) = state.registry.get(opencode::ID).and_then(opencode::models_url) else {
         return Vec::new();
     };
-    let cached = state.model_cache.lock().get(KEY).cloned();
+    let cached = state.model_cache.lock().get(OPENCODE_FREE_KEY).cloned();
     if let Some((at, list)) = cached {
         if at.elapsed() < if list.is_empty() { TTL_ERR } else { TTL_OK } {
             return opencode::with_documented(list);
@@ -83,7 +110,7 @@ pub async fn opencode_free(state: &AppState) -> Vec<String> {
             Vec::new()
         }
     };
-    state.model_cache.lock().insert(KEY.to_string(), (Instant::now(), list.clone()));
+    state.model_cache.lock().insert(OPENCODE_FREE_KEY.to_string(), (Instant::now(), list.clone()));
     opencode::with_documented(list)
 }
 

@@ -28,6 +28,7 @@ fn auth(state: &AppState, peer: SocketAddr, headers: &HeaderMap, query: &str) ->
 fn model_entries(state: &AppState, caller: &Caller, opencode_free: &[String]) -> anyhow::Result<Vec<Value>> {
     let conns = state.db.all_connections()?;
     let active: BTreeSet<&str> = conns.iter().filter(|c| c.is_active).map(|c| c.provider.as_str()).collect();
+    let hidden = state.db.kv_scope("hiddenModels")?;
     let created = state.started_at.elapsed().as_secs() as i64;
     let mut out = vec![json!({
         "id": "auto",
@@ -43,7 +44,7 @@ fn model_entries(state: &AppState, caller: &Caller, opencode_free: &[String]) ->
         let live: &[String] = if p.id == crate::oauth::opencode::ID { opencode_free } else { &[] };
         let live = live.iter().filter(|id| p.model(id).is_none()).map(|id| (id.as_str(), id.as_str()));
         for (id, name) in p.models.iter().map(|m| (m.id.as_str(), m.name.as_str())).chain(live) {
-            if !caller.may_use(&p.id, id) {
+            if !caller.may_use(&p.id, id) || crate::model::is_hidden(&hidden, &[p.id.as_str(), p.alias.as_str()], id) {
                 continue;
             }
             out.push(json!({

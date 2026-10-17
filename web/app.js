@@ -628,7 +628,9 @@ async function providerDetail(rawId) {
   setHeader({breadcrumbs: [{label: 'Providers', href: '#/providers'}, {label: name, image: icon}]});
   const list = custom ? [node] : conns.filter((c) => c.provider === prov.id).sort((a, b) => (a.priority ?? 999) - (b.priority ?? 999));
   const prefix = custom ? (node.prefix || providerId) : prov.alias;
-  const customModels = await get('/custom-models/' + encodeURIComponent(prefix));
+  const [customModels, hiddenModels] = await Promise.all([get('/custom-models/' + encodeURIComponent(prefix)), get('/models/' + encodeURIComponent(prefix) + '/hidden')]);
+  // A live model list needs an account to ask with (OpenCode Free needs none).
+  const canRefresh = custom || prov.id === 'opencode' || list.some((c) => c.isActive);
   const strat = (settings.providerStrategies || {})[prov.id] || {};
   const rr = (strat.fallbackStrategy || settings.fallbackStrategy) === 'round-robin';
   every(1000, () => $$('[data-cool]').forEach((el) => { el.textContent = '⏱ ' + cooldownText(el.dataset.cool); if (!cooldownText(el.dataset.cool)) el.remove(); }));
@@ -694,12 +696,18 @@ async function providerDetail(rawId) {
     </div>
     <div class="card">
       <div class="row between wrap gap2 mb4"><div class="row gap3 wrap"><h2 class="ct">Available Models</h2>${prov.passthroughModels || custom ? `<span class="xs muted">${custom ? 'Any model id the endpoint serves works as ' : 'Any model id is passed through as '}<code>${esc(prefix)}/&lt;model&gt;</code></span>` : ''}</div>
-        ${customModels.length || (!custom && prov.models.length) ? `<button class="btn sm secondary" data-act="testModels" title="Send a short test request to every model below">${ms('science')}Test all</button>` : ''}</div>
+        <div class="row gap2 wrap">
+          ${canRefresh ? `<button class="btn sm secondary" data-act="refreshModels" data-provider="${esc(prov.id)}" data-node="${custom ? node.id : ''}" data-prefix="${esc(prefix)}" title="Pull the provider's latest model list and add the new models that answer">${ms('sync')}Refresh models</button>` : ''}
+          ${customModels.length || (!custom && prov.models.length) ? `<button class="btn sm secondary" data-act="cleanUpModels" data-prefix="${esc(prefix)}" title="Test every model below and remove the ones that fail">${ms('cleaning_services')}Clean up</button>
+          <button class="btn sm secondary" data-act="testModels" data-prefix="${esc(prefix)}" title="Send a short test request to every model below">${ms('science')}Test all</button>` : ''}
+        </div></div>
       <div class="models">
         ${customModels.map((m) => modelRow(m, null, true)).join('')}
         ${custom ? '' : prov.models.map((m) => modelRow(m.id, m.name, false)).join('')}
         <button class="addmodel" data-act="addCustomModel" data-prefix="${esc(prefix)}">${ms('add', 14)}Add Model</button>
       </div>
+      ${hiddenModels.length ? `<div class="row gap2 wrap mt4"><span class="xs muted" title="${esc(hiddenModels.join(', '))}">${hiddenModels.length} model${hiddenModels.length === 1 ? '' : 's'} removed by Clean up: left out of /v1/models and auto</span>
+        <button class="btn sm ghost" data-act="restoreModels" data-prefix="${esc(prefix)}">${ms('undo')}Restore</button></div>` : ''}
     </div>
   </div>`;
 }
@@ -723,24 +731,29 @@ actions.moveConn = async ({id, dir}) => {
   await Promise.all(list.map((x, k) => patch('/connections/' + x.id, {priority: k + 1})));
   invalidate(); reload();
 };
-// "Test all" (upstream provider test-models): one short request per listed model,
-// results in a modal and next to each model.
-actions.testModels = async (_, b) => {
-  const slots = $$('.models .mtest');
-  const models = slots.map((s) => s.dataset.model);
-  if (!models.length) return notify('warning', 'No models to test');
+// "Test all" (upstream provider test-models): one short request per model, a few at
+// a time, with progress in a modal and next to each listed model. Resolves to the
+// results and the modal, or null when the test itself could not run.
+const spinner = (size) => ms('progress_activity', size).replace('class="ms', 'class="ms spin');
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+async function runModelTests(b, title, models, intro = '') {
+  const slots = $$('.models .mtest').filter((s) => models.includes(s.dataset.model));
   const label = b.innerHTML;
-  b.innerHTML = `${ms('progress_activity', 16).replace('class="ms', 'class="ms spin')}Testing ${models.length}…`;
+  b.innerHTML = `${spinner(16)}Testing ${models.length}…`;
   slots.forEach((s) => (s.innerHTML = badge('testing…', 'info')));
-  const m = openModal({title: 'Test all models', size: 'lg', body: `<div id="tm-body" class="row gap2">${ms('progress_activity', 18).replace('class="ms', 'class="ms spin')}<p class="sm muted">Testing ${models.length} model${models.length === 1 ? '' : 's'}, a few at a time. Slow models take up to 30s each.</p></div>`});
+  const m = openModal({title, size: 'lg', body: `<div id="tm-body" class="row gap2">${spinner(18)}<p class="sm muted">${intro}Testing ${plural(models.length, 'model')}, a few at a time. Slow models take up to 30s each.</p></div>`});
   let res;
   try { res = await post('/test-models', {models}); }
-  catch (e) { slots.forEach((s) => (s.innerHTML = '')); const el = $('#tm-body'); if (el) el.innerHTML = `<p class="sm" style="color:#dc2626">${esc(e.message)}</p>`; return; }
+  catch (e) { slots.forEach((s) => (s.innerHTML = '')); const el = $('#tm-body'); if (el) el.innerHTML = `<p class="sm" style="color:#dc2626">${esc(e.message)}</p>`; return null; }
   finally { b.innerHTML = label; }
   for (const r of res.results) {
     const s = slots.find((x) => x.dataset.model === r.model); if (!s) continue;
     s.innerHTML = r.ok ? badge(`${r.latencyMs}ms`, 'success', true) : `<span title="${esc(r.error || '')}">${badge('failed', 'error', true)}</span>`;
   }
+  return {res, m};
+}
+// Fills the test modal (if still open): summary badges, `extra`, one row per model.
+function showTestReport({res, m}, extra = '') {
   const el = $('#tm-body'); if (!el || !m.form.isConnected) return;
   const failed = res.total - res.ok;
   const rows = [...res.results].sort((x, y) => Number(x.ok) - Number(y.ok)).map((r) => `<div class="row gap3 start" style="padding:8px 0;border-top:1px solid var(--border)">
@@ -750,7 +763,62 @@ actions.testModels = async (_, b) => {
       <span class="xs muted shrink0">${esc(r.latencyMs)}ms</span></div>`).join('');
   el.outerHTML = `<div>
     <div class="row gap2 wrap mb4">${badge(`${res.ok} working`, 'success', true, 'md')}${failed ? badge(`${failed} failed`, 'error', true, 'md') : ''}<span class="xs muted">of ${res.total} models</span></div>
-    <div style="max-height:60vh;overflow:auto">${rows}</div></div>`;
+    ${extra}<div style="max-height:60vh;overflow:auto">${rows}</div></div>`;
+}
+// Models a clean up removes: every one that did not answer, except rate limits (the
+// model works, the account is only busy right now).
+const failedModels = (res) => res.results.filter((r) => !r.ok && r.status !== 429).map((r) => r.model);
+const modelIds = (prefix, models) => models.map((m) => m.slice(prefix.length + 1));
+const listedModels = () => $$('.models .mtest').map((s) => s.dataset.model);
+const removeModels = (prefix, models) => post('/models/' + encodeURIComponent(prefix) + '/remove', {models: modelIds(prefix, models)});
+
+actions.testModels = async ({prefix}, b) => {
+  const models = listedModels();
+  if (!models.length) return notify('warning', 'No models to test');
+  const t = await runModelTests(b, 'Test all models', models); if (!t) return;
+  const failed = failedModels(t.res);
+  showTestReport(t, failed.length ? `<div class="mb4"><button type="button" class="btn sm danger" data-act="removeFailed" data-prefix="${esc(prefix)}" data-models="${esc(JSON.stringify(failed))}">${ms('delete', 16)}Remove ${plural(failed.length, 'failed model')}</button></div>` : '');
+};
+actions.removeFailed = async ({prefix, models}) => {
+  const list = JSON.parse(models);
+  await removeModels(prefix, list);
+  $('#modal [data-close]')?.click();
+  notify('success', `Removed ${plural(list.length, 'model')}`); invalidate(); reload();
+};
+// "Clean up": test every listed model and remove the ones that fail.
+actions.cleanUpModels = async ({prefix}, b) => {
+  const models = listedModels();
+  if (!models.length) return notify('warning', 'No models to clean up');
+  if (!(await confirmModal({title: 'Clean up models', message: `Test all ${plural(models.length, 'model')} and remove the ones that fail? Rate-limited models are kept. Removed catalogue models can be restored; failing models you added yourself are deleted.`, confirmText: 'Clean up'}))) return;
+  await new Promise((r) => setTimeout(r)); // let the confirm dialog close before the next one opens
+  const t = await runModelTests(b, 'Clean up models', models); if (!t) return;
+  const failed = failedModels(t.res);
+  if (failed.length) await removeModels(prefix, failed);
+  showTestReport(t, `<p class="sm mb4">${failed.length ? `Removed ${plural(failed.length, 'model')} that failed.` : 'Every model answered: nothing to remove.'}</p>`);
+  if (failed.length) { invalidate(); reload(); }
+};
+// "Refresh models": pull the provider's live model list, test the models this page
+// doesn't list yet and add the ones that answer.
+actions.refreshModels = async ({provider, node, prefix}, b) => {
+  const MAX = 300; // /test-models limit
+  const label = b.innerHTML;
+  b.innerHTML = `${spinner(16)}Fetching…`;
+  let live;
+  try { live = (await post('/refresh-models', {provider, node: node || null})).models; }
+  finally { b.innerHTML = label; }
+  const listed = new Set(listedModels());
+  const fresh = live.map((id) => `${prefix}/${id}`).filter((m) => !listed.has(m));
+  if (!fresh.length) return notify('success', `Up to date: every model the provider lists (${live.length}) is already here`);
+  const t = await runModelTests(b, 'Refresh models', fresh.slice(0, MAX), `The provider lists ${plural(fresh.length, 'model')} not on this page${fresh.length > MAX ? `; testing the first ${MAX}` : ''}. `);
+  if (!t) return;
+  const working = t.res.results.filter((r) => r.ok).map((r) => r.model);
+  if (working.length) await post('/models/' + encodeURIComponent(prefix) + '/add', {models: modelIds(prefix, working)});
+  showTestReport(t, `<p class="sm mb4">${working.length ? `Added ${plural(working.length, 'working model')} to the list.` : 'None of the new models answered: nothing added.'}</p>`);
+  if (working.length) { invalidate(); reload(); }
+};
+actions.restoreModels = async ({prefix}) => {
+  await del('/models/' + encodeURIComponent(prefix) + '/hidden');
+  notify('success', 'Removed models restored'); invalidate(); reload();
 };
 actions.toggleConn = async ({id}, b) => { await patch('/connections/' + id, {isActive: b.getAttribute('aria-checked') !== 'true'}); invalidate(); reload(); };
 actions.unlockConn = async ({id}) => { await post('/connections/' + id + '/unlock'); invalidate(); notify('success', 'Connection unlocked'); reload(); };

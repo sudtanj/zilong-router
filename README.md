@@ -5,25 +5,31 @@ carried his charge safely through an entire army at Changban: every request gets
 The old names keep working: `MINI_ROUTER_*` environment variables, the `mini-router/auto`
 model and the `x-mini-router-model` response header (sent alongside `x-zilong-router-model`).
 
-A small, single-binary AI API router written in Rust. It is a re-implementation of the
-core of [9router](https://github.com/decolua/9router) sized for a 1 GB ARM board such
-as the Orange Pi Zero 3:
+A small, single-binary AI API router written in Rust. It is a re-implementation of
+[9router](https://github.com/decolua/9router) sized for a 1 GB ARM board such as the
+Orange Pi Zero 3:
 
 - One endpoint for your coding tools: OpenAI Chat Completions (`/v1/chat/completions`)
   and Anthropic Messages (`/v1/messages`), with translation between the two in both
   directions, streaming and non-streaming, including tool calls and thinking.
 - Multiple accounts per provider with fill-first or round-robin selection, per-model
   cooldown locks and exponential backoff on rate limits, automatic fallback to the next
-  account, and retries on 502/503/504 (the same rules as upstream).
-- Usage and cost per request in SQLite, priced from upstream's pricing table.
+  account, and retries on 502/503/504 (the same rules as upstream). The `auto` model
+  falls back (or rotates) across every connected provider.
+- OAuth sign-in and free providers (Claude, GitHub Copilot, xAI, Kimi, Cline, OpenCode
+  and more), plus the RTK / Caveman token saver.
+- A port of the 9router web dashboard, served by the same binary with no Node and no
+  build step.
+- Usage and cost per request in SQLite, priced from upstream's pricing table, with
+  optional offsite storage in Turso.
 - Provider definitions are **copied from upstream automatically**: a weekly GitHub
-  Actions job clones 9router, converts its registry to `data/providers.json` and opens a
-  pull request. No hand-maintained provider list.
-- No Node, no build step on the device, no dashboard process. Idle memory is a few MB.
+  Actions job clones 9router and converts its registry to `data/providers.json`. No
+  hand-maintained provider list.
+- Idle memory is a few MB.
 
-Not (yet) included: the web dashboard, OAuth logins (Claude Code, Codex, Copilot, Kiro
-…), Gemini wire format, model combos, the RTK token saver, embeddings, image/audio.
-Providers that need those are listed in `data/skipped.json` after each sync.
+Not (yet) included: Gemini wire format, model combos, the Responses API, embeddings,
+image/audio, and providers that need IDE-impersonation executors (Cursor, Windsurf, Kiro
+…). Providers that need those are listed in `data/skipped.json` after each sync.
 
 ## Install on the Orange Pi
 

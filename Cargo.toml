@@ -3,7 +3,7 @@ name = "zilong-router"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.80"
-description = "Lightweight AI API router (OpenAI / Anthropic / Gemini translation, multi-account fallback, usage tracking) for SBCs"
+description = "zilong-router: lightweight single-binary AI API router (OpenAI / Anthropic translation, multi-account fallback, OAuth providers, usage tracking, 9router dashboard) for 1 GB SBCs"
 license-file = "LICENSE"
 build = "build.rs"
 

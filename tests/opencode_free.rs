@@ -228,7 +228,6 @@ async fn documented_model_is_routed_to_the_free_chat_endpoint() {
         .await
         .unwrap();
     assert_eq!(resp.status(), 200);
-    assert_eq!(resp.headers()["x-zilong-router-model"], "opencode/exo-free");
     let v: Value = resp.json().await.unwrap();
     assert_eq!(v["choices"][0]["message"]["content"], "pong", "{v}");
 

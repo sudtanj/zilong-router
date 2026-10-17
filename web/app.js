@@ -1117,9 +1117,9 @@ pages.profile = async () => {
     <div class="card">
       <div class="row gap3 mb4"><div class="icon-tile p tint-blue">${ms('route', 20)}</div><h3 class="ct">Routing Strategy</h3></div>
       <div class="col gap4">
-        ${row('Round Robin', 'Cycle through accounts to distribute load', toggle(rr, 'data-act="setStrategy"'))}
-        ${rr ? row('Sticky Limit', 'Calls per account before switching', `<input id="sticky" class="input center w20 shrink0" type="number" min="1" max="10" value="${esc(s.stickyRoundRobinLimit || 3)}">`, 'pt4 bt-soft') : ''}
-        <p class="xs muted pt4 bt-soft" style="font-style:italic">${rr ? `Currently distributing requests across all available accounts with ${s.stickyRoundRobinLimit || 3} calls per account.` : 'Currently using accounts in priority order (Fill First).'} Per-provider overrides live on each provider page.</p>
+        ${row('Round Robin', 'Cycle through accounts, and the models of auto, to distribute load', toggle(rr, 'data-act="setStrategy"'))}
+        ${rr ? row('Sticky Limit', 'Calls per account (or auto model) before switching', `<input id="sticky" class="input center w20 shrink0" type="number" min="1" max="10" value="${esc(s.stickyRoundRobinLimit || 3)}">`, 'pt4 bt-soft') : ''}
+        <p class="xs muted pt4 bt-soft" style="font-style:italic">${rr ? `Currently distributing requests across all available accounts with ${s.stickyRoundRobinLimit || 3} calls per account; auto rotates its models the same way.` : 'Currently using accounts in priority order (Fill First); auto tries its models in order and falls back on failure.'} Per-provider overrides live on each provider page.</p>
       </div>
     </div>
 

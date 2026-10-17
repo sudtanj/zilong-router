@@ -160,17 +160,20 @@ async fn handle_inner(
     } else {
         requested
     };
-    let candidates = crate::discovery::auto_candidates(&state, &aliases, &connections, &explicit).await;
+    let mut candidates = crate::discovery::auto_candidates(&state, &aliases, &connections, &explicit).await;
+    // Drop unusable models before rotating so round-robin only cycles real options.
+    candidates.retain(|c| {
+        state.registry.get(&c.provider).is_some_and(|p| {
+            caller.may_use(&p.id, &c.model)
+                && p.transport_for(source, &c.model).map(|t| t.format.supported()).unwrap_or(false)
+        })
+    });
+    crate::router::rotate_auto(&state, &mut candidates);
 
     let mut last: Option<ApiError> = None;
     let mut failures: Vec<String> = Vec::new();
     for c in candidates {
         let Some(p) = state.registry.get(&c.provider) else { continue };
-        let usable = caller.may_use(&p.id, &c.model)
-            && p.transport_for(source, &c.model).map(|t| t.format.supported()).unwrap_or(false);
-        if !usable {
-            continue;
-        }
         let label = format!("{}/{}", p.id, c.model);
         match attempt(&state, &req, &c, &label).await {
             Ok(mut resp) => {

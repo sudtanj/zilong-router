@@ -9,6 +9,7 @@ use serde_json::{json, Value};
 use time::{Duration, OffsetDateTime};
 
 use crate::db::ProviderConnection;
+use crate::model::Resolved;
 use crate::state::AppState;
 
 pub const BACKOFF_BASE_MS: i64 = 2_000;
@@ -103,7 +104,7 @@ pub enum Pick {
 ///
 /// Strategy comes from `settings.providerStrategies[provider].fallbackStrategy`,
 /// then `settings.fallbackStrategy`, default `fill-first`. Round-robin is sticky for
-/// `settings.stickyRoundRobinLimit` (default 3) consecutive requests.
+/// `stickyRoundRobinLimit` (per provider, then global, default 3) consecutive requests.
 pub fn pick(
     state: &AppState,
     provider: &str,
@@ -155,28 +156,49 @@ pub fn pick(
         return Ok(Pick::Connection(candidates.into_iter().next().unwrap()));
     }
 
-    let sticky = settings.get("stickyRoundRobinLimit").and_then(Value::as_i64).unwrap_or(3).max(1);
-    let mut rr = state.rr.lock();
-    let entry = rr.entry(provider.to_string()).or_default();
-    if let Some(last) = &entry.last_id {
+    let sticky = settings
+        .pointer(&format!("/providerStrategies/{provider}/stickyRoundRobinLimit"))
+        .or_else(|| settings.get("stickyRoundRobinLimit"))
+        .and_then(Value::as_i64)
+        .unwrap_or(3)
+        .max(1);
+    let ids: Vec<&str> = candidates.iter().map(|c| c.id.as_str()).collect();
+    let idx = advance(state.rr.lock().entry(provider.to_string()).or_default(), &ids, sticky);
+    Ok(Pick::Connection(candidates[idx].clone()))
+}
+
+/// Sticky round-robin step over `ids` (priority order): stay on the last-used id until
+/// it has served `sticky` requests, then move to the one after it. Returns its index.
+fn advance(entry: &mut RoundRobin, ids: &[&str], sticky: i64) -> usize {
+    let last = entry.last_id.as_deref().and_then(|l| ids.iter().position(|id| *id == l));
+    if let Some(i) = last {
         if entry.consecutive < sticky {
-            if let Some(c) = candidates.iter().find(|c| &c.id == last) {
-                entry.consecutive += 1;
-                return Ok(Pick::Connection(c.clone()));
-            }
+            entry.consecutive += 1;
+            return i;
         }
     }
-    // Next candidate after the last-used one in priority order.
-    let idx = entry
-        .last_id
-        .as_ref()
-        .and_then(|l| candidates.iter().position(|c| &c.id == l))
-        .map(|i| (i + 1) % candidates.len())
-        .unwrap_or(0);
-    let chosen = candidates[idx].clone();
-    entry.last_id = Some(chosen.id.clone());
+    let idx = last.map_or(0, |i| (i + 1) % ids.len());
+    entry.last_id = Some(ids[idx].to_string());
     entry.consecutive = 1;
-    Ok(Pick::Connection(chosen))
+    idx
+}
+
+/// Cursor key for `auto` in `AppState::rr` (provider ids never contain a space).
+const AUTO_RR_KEY: &str = "auto model";
+
+/// `auto` follows the global Round Robin setting: each request starts at the next
+/// candidate (sticky for `stickyRoundRobinLimit` requests, like accounts) and the
+/// rest, in order, stay as fallbacks. Fill-first, the default, keeps the order.
+pub fn rotate_auto(state: &AppState, candidates: &mut [Resolved]) {
+    let settings = state.db.settings();
+    if candidates.len() < 2 || settings.get("fallbackStrategy").and_then(Value::as_str) != Some("round-robin") {
+        return;
+    }
+    let sticky = settings.get("stickyRoundRobinLimit").and_then(Value::as_i64).unwrap_or(3).max(1);
+    let labels: Vec<String> = candidates.iter().map(|c| format!("{}/{}", c.provider, c.model)).collect();
+    let ids: Vec<&str> = labels.iter().map(String::as_str).collect();
+    let idx = advance(state.rr.lock().entry(AUTO_RR_KEY.to_string()).or_default(), &ids, sticky);
+    candidates.rotate_left(idx);
 }
 
 fn virtual_connection(provider: &str) -> ProviderConnection {
@@ -285,6 +307,17 @@ pub fn clear_expired_locks(state: &AppState) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn round_robin_cursor_is_sticky_then_moves_on() {
+        let mut rr = RoundRobin::default();
+        let ids = ["a", "b", "c"];
+        let picks: Vec<usize> = (0..7).map(|_| advance(&mut rr, &ids, 2)).collect();
+        assert_eq!(picks, [0, 0, 1, 1, 2, 2, 0]);
+        // The last-used id vanished from the list: start over from the top.
+        assert_eq!(advance(&mut rr, &["x", "y"], 2), 0);
+        assert_eq!(rr.last_id.as_deref(), Some("x"));
+    }
 
     #[test]
     fn classification_matches_upstream_rules() {

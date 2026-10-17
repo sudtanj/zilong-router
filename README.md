@@ -73,6 +73,9 @@ Candidates come from, in order of preference:
 
 Candidates are tried one after another until one answers; a failure (error, rate
 limit, no free account) just moves on to the next model, until none are left.
+With **Round Robin** on in Settings (`fallbackStrategy: "round-robin"`), each request
+starts one model further down the list (after `stickyRoundRobinLimit` requests on the
+same one) and the rest stay as fallbacks; with it off, `auto` always starts at the top.
 
 Requests from the Pi itself need no key. Requests from the LAN need one, and you can
 force keys everywhere with `mini-router settings requireApiKey=true`.

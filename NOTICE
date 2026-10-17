@@ -1,0 +1,10 @@
+mini-router
+Derived from 9router (https://github.com/decolua/9router),
+Copyright (c) 2024-2026 decolua and contributors, licensed under the MIT License.
+The provider registry, pricing and icons (data/, regenerated from upstream by
+tools/sync-upstream), the routing/fallback/translation rules and the dashboard
+UI are ports of 9router's. See LICENSE and LICENSE-MIT.
+
+Required Notice: Copyright (c) 2026-present Sudono Tanjung (https://github.com/sudtanj)
+Modifications and original work are licensed under the PolyForm Noncommercial
+License 1.0.0 (LICENSE-POLYFORM-NONCOMMERCIAL.md).

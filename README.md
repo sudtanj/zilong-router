@@ -275,3 +275,11 @@ opens, and every sync interval (plus once on clean shutdown) pushes changes back
   to shrink that window at the cost of more row writes.
 - The `mini-router` CLI subcommands cannot work against an in-memory database; use the
   dashboard.
+
+## License
+
+**Source-available: free for personal use, paid for commercial use.**
+
+- Modifications and original code are under the [PolyForm Noncommercial License 1.0.0](LICENSE-POLYFORM-NONCOMMERCIAL.md), Copyright (c) 2026-present Sudono Tanjung. You can run, read and modify it for personal and other noncommercial use at no cost.
+- **Commercial use** (in or for a business, as a hosted service, or in a commercial product) needs a paid commercial license: contact [@sudtanj](https://github.com/sudtanj).
+- The portions derived from [9router](https://github.com/decolua/9router) (Copyright (c) decolua and contributors) stay under the [MIT License](LICENSE-MIT), and versions published before the license change remain available under it. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

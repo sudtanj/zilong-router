@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.80"
 description = "Lightweight AI API router (OpenAI / Anthropic / Gemini translation, multi-account fallback, usage tracking) for SBCs"
-license = "MIT"
+license-file = "LICENSE"
 build = "build.rs"
 
 [[bin]]

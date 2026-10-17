@@ -746,7 +746,8 @@ fn kv_list(db: &Db, scope: &str, key: &str) -> anyhow::Result<Vec<String>> {
 }
 
 fn kv_save(db: &Db, scope: &str, key: &str, list: &[String]) -> anyhow::Result<()> {
-    db.kv_set(scope, key, if list.is_empty() { None } else { Some(&json!(list)) })
+    let value = json!(list);
+    db.kv_set(scope, key, if list.is_empty() { None } else { Some(&value) })
 }
 
 #[derive(Deserialize)]

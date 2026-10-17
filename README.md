@@ -143,7 +143,9 @@ Pages, matching upstream's sidebar:
   connection counts, error codes and enable/disable toggles, status filter and header
   search; a provider page with the connections list (priority arrows, cooldown timer,
   last error, unlock, edit, delete, toggle, per-provider round-robin) and the
-  *Available Models* chips with copy and custom models. *Add OpenAI Compatible* /
+  *Available Models* chips with copy and custom models, plus one *Test all* button that
+  sends a short "hi" to every listed model (three at a time, 30s each at most) and shows
+  which work, their latency and the error of those that don't. *Add OpenAI Compatible* /
   *Add Anthropic Compatible* create custom endpoints with a prefix.
 - **Usage**: Today / 24h / 7D / 30D / 60D / All periods, overview cards, providers and
   recent requests, tokens / requests / cost chart, provider and model breakdowns, and

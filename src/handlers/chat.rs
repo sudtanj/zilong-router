@@ -211,6 +211,63 @@ async fn handle_inner(
     })
 }
 
+/// Dashboard model test (upstream `api/models/test/ping.js`): a tiny chat request
+/// through the normal routing path. Returns `{ok, latencyMs, status, error, note}`.
+pub async fn ping(state: &Arc<AppState>, model: &str) -> Value {
+    const TIMEOUT: Duration = Duration::from_secs(30);
+    let started = Instant::now();
+    // 1024 tokens: reasoning models spend a small budget on thinking and answer nothing.
+    let body =
+        json!({"model": model, "max_tokens": 1024, "stream": false, "messages": [{"role": "user", "content": "hi"}]});
+    let headers = HeaderMap::new();
+    let caller = Caller::Local;
+    let req = Req {
+        caller: &caller,
+        headers: &headers,
+        source: Format::Openai,
+        body: &body,
+        client_stream: false,
+        endpoint: "/api/admin/test-models",
+        started,
+        body_len: body.to_string().len(),
+    };
+    let run = async {
+        let aliases =
+            state.db.kv_scope("modelAliases").map_err(|e| ApiError::new(500, Format::Openai, e.to_string()))?;
+        let conns = state.db.all_connections().map_err(|e| ApiError::new(500, Format::Openai, e.to_string()))?;
+        let resolved = crate::model::resolve(&state.registry, &aliases, &conns, model);
+        let resp = attempt(state, &req, &resolved, model).await?;
+        let status = resp.status().as_u16();
+        let bytes = axum::body::to_bytes(resp.into_body(), 4 << 20)
+            .await
+            .map_err(|e| ApiError::new(502, Format::Openai, format!("reading the answer: {e}")))?;
+        Ok::<_, ApiError>((status, serde_json::from_slice::<Value>(&bytes).unwrap_or(Value::Null)))
+    };
+    let result = tokio::time::timeout(TIMEOUT, run).await;
+    let latency = started.elapsed().as_millis() as u64;
+    let fail =
+        |status: u16, error: String| json!({"ok": false, "latencyMs": latency, "status": status, "error": error});
+    let (status, v) = match result {
+        Err(_) => return fail(504, format!("no answer within {}s", TIMEOUT.as_secs())),
+        Ok(Err(e)) => return fail(e.status.as_u16(), e.message.chars().take(500).collect()),
+        Ok(Ok(r)) => r,
+    };
+    if let Some(err) = v.get("error").filter(|e| !e.is_null()) {
+        let msg = err.get("message").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| err.to_string());
+        return fail(status, msg.chars().take(240).collect());
+    }
+    let Some(choice) = v.pointer("/choices/0") else {
+        return fail(status, "Provider returned no completion choices for this model".into());
+    };
+    // A reasoning model may spend the whole budget thinking: still a working model.
+    let msg = &choice["message"];
+    let empty = msg.get("content").and_then(Value::as_str).map_or(true, |c| c.trim().is_empty());
+    let reasoning =
+        ["reasoning", "reasoning_content", "thinking"].iter().any(|k| msg.get(k).is_some_and(|r| !r.is_null()));
+    let note = (empty && reasoning).then_some("reasoning-only response");
+    json!({"ok": true, "latencyMs": latency, "status": status, "error": null, "note": note})
+}
+
 #[derive(Clone, Copy)]
 struct Req<'a> {
     caller: &'a Caller,

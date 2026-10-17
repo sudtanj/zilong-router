@@ -151,6 +151,15 @@ fn connection_json(c: &ProviderConnection, registry: &Registry, now: OffsetDateT
 
 pub async fn providers(State(state): S) -> R {
     let conns = state.db.all_connections()?;
+    // OpenCode Free's chat models come from a live list (cached).
+    let opencode_free = crate::discovery::opencode_free(&state).await;
+    let models_of = |p: &crate::providers::Provider| {
+        let mut out: Vec<Value> = p.models.iter().map(|m| json!({"id": m.id, "name": m.name})).collect();
+        if p.id == crate::oauth::opencode::ID {
+            out.extend(opencode_free.iter().filter(|id| p.model(id).is_none()).map(|id| json!({"id": id, "name": id})));
+        }
+        out
+    };
     let mut list: Vec<Value> = state
         .registry
         .all()
@@ -180,7 +189,7 @@ pub async fn providers(State(state): S) -> R {
                 "apiKeyUrl": d.api_key_url,
                 "riskNotice": d.deprecation_notice.as_ref().filter(|_| d.deprecated),
                 "accounts": conns.iter().filter(|c| c.provider == p.id).count(),
-                "models": p.models.iter().map(|m| json!({"id": m.id, "name": m.name})).collect::<Vec<_>>(),
+                "models": models_of(p),
             })
         })
         .collect();
@@ -513,6 +522,52 @@ pub async fn patch_settings(State(state): S, Json(mut patch): Json<Value>) -> R 
 //
 // Compatible endpoints accept any model id, so the list is only a convenience for
 // the dashboard (copyable `prefix/model` chips). Stored in kv scope `customModels`.
+
+#[derive(Deserialize)]
+pub struct TestModelsBody {
+    models: Vec<String>,
+}
+
+/// "Test all" on a provider page (upstream `providers/[id]/test-models`): ping each
+/// `prefix/model`. The first runs alone so an expiring token is refreshed once, the
+/// rest a few at a time to stay light on a small board.
+pub async fn test_models(State(state): S, Json(b): Json<TestModelsBody>) -> R {
+    use futures_util::StreamExt;
+    const PARALLEL: usize = 3;
+    let mut models: Vec<String> = Vec::new();
+    for m in b.models.iter().map(|m| m.trim()).filter(|m| !m.is_empty()) {
+        if !models.iter().any(|x| x == m) {
+            models.push(m.to_string());
+        }
+    }
+    if models.is_empty() {
+        return Err(bad("no models to test"));
+    }
+    if models.len() > 300 {
+        return Err(bad("too many models (300 at most)"));
+    }
+    let entry = |m: String, r: Value| {
+        let mut r = r;
+        r["model"] = json!(m);
+        r
+    };
+    let first = models.remove(0);
+    let mut results = vec![entry(first.clone(), crate::handlers::chat::ping(&state, &first).await)];
+    let rest: Vec<Value> = futures_util::stream::iter(models)
+        .map(|m| {
+            let state = state.clone();
+            async move {
+                let r = crate::handlers::chat::ping(&state, &m).await;
+                entry(m, r)
+            }
+        })
+        .buffered(PARALLEL)
+        .collect()
+        .await;
+    results.extend(rest);
+    let ok = results.iter().filter(|r| r["ok"] == json!(true)).count();
+    Ok(Json(json!({"total": results.len(), "ok": ok, "results": results})))
+}
 
 pub async fn custom_models(State(state): S, Path(prefix): Path<String>) -> R {
     let m = state.db.kv_scope("customModels")?;

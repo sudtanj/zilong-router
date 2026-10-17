@@ -616,6 +616,7 @@ async function providerDetail(rawId) {
   const modelRow = (id, nm, isCustom) => `<div class="mrow"><div class="in">
       ${ms('smart_toy', 16)}
       <div class="col gap1 grow"><code class="truncate">${esc(prefix)}/${esc(id)}</code>${nm && nm !== id ? `<span class="nm truncate">${esc(nm)}</span>` : ''}</div>
+      <span class="mtest" data-model="${esc(prefix)}/${esc(id)}"></span>
       <div class="ops"><button class="tiny" data-act="copy" data-text="${esc(prefix)}/${esc(id)}" title="Copy">${ms('content_copy', 14)}</button>
       ${isCustom ? `<button class="tiny danger" data-act="delCustomModel" data-prefix="${esc(prefix)}" data-model="${esc(id)}" title="Remove custom model">${ms('close', 14)}</button>` : ''}</div>
     </div></div>`;
@@ -644,7 +645,8 @@ async function providerDetail(rawId) {
         : `<div class="connlist">${list.map(connRow).join('')}</div>${custom ? '' : `<div class="mt4 row gap2">${addBtn}</div>`}`}
     </div>
     <div class="card">
-      <div class="row between wrap gap2 mb4"><h2 class="ct">Available Models</h2>${prov.passthroughModels || custom ? `<span class="xs muted">${custom ? 'Any model id the endpoint serves works as ' : 'Any model id is passed through as '}<code>${esc(prefix)}/&lt;model&gt;</code></span>` : ''}</div>
+      <div class="row between wrap gap2 mb4"><div class="row gap3 wrap"><h2 class="ct">Available Models</h2>${prov.passthroughModels || custom ? `<span class="xs muted">${custom ? 'Any model id the endpoint serves works as ' : 'Any model id is passed through as '}<code>${esc(prefix)}/&lt;model&gt;</code></span>` : ''}</div>
+        ${customModels.length || (!custom && prov.models.length) ? `<button class="btn sm secondary" data-act="testModels" title="Send a short test request to every model below">${ms('science')}Test all</button>` : ''}</div>
       <div class="models">
         ${customModels.map((m) => modelRow(m, null, true)).join('')}
         ${custom ? '' : prov.models.map((m) => modelRow(m.id, m.name, false)).join('')}
@@ -672,6 +674,35 @@ actions.moveConn = async ({id, dir}) => {
   [list[i], list[j]] = [list[j], list[i]];
   await Promise.all(list.map((x, k) => patch('/connections/' + x.id, {priority: k + 1})));
   invalidate(); reload();
+};
+// "Test all" (upstream provider test-models): one short request per listed model,
+// results in a modal and next to each model.
+actions.testModels = async (_, b) => {
+  const slots = $$('.models .mtest');
+  const models = slots.map((s) => s.dataset.model);
+  if (!models.length) return notify('warning', 'No models to test');
+  const label = b.innerHTML;
+  b.innerHTML = `${ms('progress_activity', 16).replace('class="ms', 'class="ms spin')}Testing ${models.length}…`;
+  slots.forEach((s) => (s.innerHTML = badge('testing…', 'info')));
+  const m = openModal({title: 'Test all models', size: 'lg', body: `<div id="tm-body" class="row gap2">${ms('progress_activity', 18).replace('class="ms', 'class="ms spin')}<p class="sm muted">Testing ${models.length} model${models.length === 1 ? '' : 's'}, a few at a time. Slow models take up to 30s each.</p></div>`});
+  let res;
+  try { res = await post('/test-models', {models}); }
+  catch (e) { slots.forEach((s) => (s.innerHTML = '')); const el = $('#tm-body'); if (el) el.innerHTML = `<p class="sm" style="color:#dc2626">${esc(e.message)}</p>`; return; }
+  finally { b.innerHTML = label; }
+  for (const r of res.results) {
+    const s = slots.find((x) => x.dataset.model === r.model); if (!s) continue;
+    s.innerHTML = r.ok ? badge(`${r.latencyMs}ms`, 'success', true) : `<span title="${esc(r.error || '')}">${badge('failed', 'error', true)}</span>`;
+  }
+  const el = $('#tm-body'); if (!el || !m.form.isConnected) return;
+  const failed = res.total - res.ok;
+  const rows = [...res.results].sort((x, y) => Number(x.ok) - Number(y.ok)).map((r) => `<div class="row gap3 start" style="padding:8px 0;border-top:1px solid var(--border)">
+      <span style="color:${r.ok ? '#16a34a' : '#dc2626'}">${ms(r.ok ? 'check_circle' : 'cancel', 18)}</span>
+      <div class="grow" style="min-width:0"><code class="sm break">${esc(r.model)}</code>
+        ${r.ok ? (r.note ? `<p class="xs muted">${esc(r.note)}</p>` : '') : `<p class="xs break" style="color:#dc2626">${r.status ? 'HTTP ' + esc(r.status) + ': ' : ''}${esc(r.error || 'failed')}</p>`}</div>
+      <span class="xs muted shrink0">${esc(r.latencyMs)}ms</span></div>`).join('');
+  el.outerHTML = `<div>
+    <div class="row gap2 wrap mb4">${badge(`${res.ok} working`, 'success', true, 'md')}${failed ? badge(`${failed} failed`, 'error', true, 'md') : ''}<span class="xs muted">of ${res.total} models</span></div>
+    <div style="max-height:60vh;overflow:auto">${rows}</div></div>`;
 };
 actions.toggleConn = async ({id}, b) => { await patch('/connections/' + id, {isActive: b.getAttribute('aria-checked') !== 'true'}); invalidate(); reload(); };
 actions.unlockConn = async ({id}) => { await post('/connections/' + id + '/unlock'); invalidate(); notify('success', 'Connection unlocked'); reload(); };

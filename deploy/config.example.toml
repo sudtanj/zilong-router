@@ -1,8 +1,8 @@
-# Optional config file: mini-router --config /etc/mini-router.toml
+# Optional config file: zilong-router --config /etc/zilong-router.toml
 # CLI flags and environment variables override these values.
 host = "0.0.0.0"
 port = 20128
-data_dir = "/var/lib/mini-router"
+data_dir = "/var/lib/zilong-router"
 # require_api_key = true
 # workers = 2
 # log_level = "info"
@@ -17,7 +17,7 @@ data_dir = "/var/lib/mini-router"
 
 # Offsite copy on Turso (hosted libSQL). Prefer the TURSO_DATABASE_URL / TURSO_AUTH_TOKEN
 # environment variables so the token stays out of this file.
-# turso_url = "libsql://mini-router-<org>.turso.io"
+# turso_url = "libsql://zilong-router-<org>.turso.io"
 # turso_token = "..."
 # Keep no database file on disk (SQLite in RAM, Turso is the only durable copy):
 # TURSO_ONLY=1 in the environment.

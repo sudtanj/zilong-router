@@ -1,4 +1,9 @@
-# mini-router
+# zilong-router
+
+*Formerly mini-router.* Named after Zhao Yun (Zilong), the Three Kingdoms general who
+carried his charge safely through an entire army at Changban: every request gets through.
+The old names keep working: `MINI_ROUTER_*` environment variables, the `mini-router/auto`
+model and the `x-mini-router-model` response header (sent alongside `x-zilong-router-model`).
 
 A small, single-binary AI API router written in Rust. It is a re-implementation of the
 core of [9router](https://github.com/decolua/9router) sized for a 1 GB ARM board such
@@ -22,29 +27,29 @@ Providers that need those are listed in `data/skipped.json` after each sync.
 
 ## Install on the Orange Pi
 
-Download `mini-router-aarch64-unknown-linux-musl.tar.gz` from the releases page (built by
+Download `zilong-router-aarch64-unknown-linux-musl.tar.gz` from the releases page (built by
 CI; it is a static binary), then:
 
 ```sh
-tar xzf mini-router-aarch64-unknown-linux-musl.tar.gz
-sudo install -m755 mini-router /usr/local/bin/
-sudo useradd -r -m -d /var/lib/mini-router mini-router
-sudo install -m644 deploy/mini-router.service /etc/systemd/system/
-sudo systemctl enable --now mini-router
+tar xzf zilong-router-aarch64-unknown-linux-musl.tar.gz
+sudo install -m755 zilong-router /usr/local/bin/
+sudo useradd -r -m -d /var/lib/zilong-router zilong-router
+sudo install -m644 deploy/zilong-router.service /etc/systemd/system/
+sudo systemctl enable --now zilong-router
 ```
 
-Or with Docker: `docker run -d -p 20128:20128 -v mini-router:/data ghcr.io/<you>/mini-router`.
+Or with Docker: `docker run -d -p 20128:20128 -v zilong-router:/data ghcr.io/<you>/zilong-router`.
 
 ## First run
 
 ```sh
-export DATA_DIR=/var/lib/mini-router        # same dir the service uses
-mini-router providers                       # list providers from the synced registry
-mini-router connection add deepseek sk-...  --name personal
-mini-router connection add anthropic sk-ant-...
-mini-router connection add openai-compatible ollama --base-url http://nas:11434/v1 --prefix local
-mini-router apikey create --name laptop     # prints the key your tools will use
-mini-router alias set fast groq/llama-3.3-70b-versatile
+export DATA_DIR=/var/lib/zilong-router      # same dir the service uses
+zilong-router providers                     # list providers from the synced registry
+zilong-router connection add deepseek sk-...  --name personal
+zilong-router connection add anthropic sk-ant-...
+zilong-router connection add openai-compatible ollama --base-url http://nas:11434/v1 --prefix local
+zilong-router apikey create --name laptop   # prints the key your tools will use
+zilong-router alias set fast groq/llama-3.3-70b-versatile
 ```
 
 Point a tool at it:
@@ -60,12 +65,12 @@ which is routed by name (`claude-*` to Anthropic, `gpt-*` to OpenAI, …).
 
 Model `auto` (like OpenRouter's `openrouter/auto`) routes to whatever is available:
 it walks candidate models until one answers, skipping models whose accounts are all
-cooling down, and reports the one it used in the `x-mini-router-model` response header.
+cooling down, and reports the one it used in the `x-zilong-router-model` response header.
 Candidates come from, in order of preference:
 
 1. the request's `models` array (OpenRouter's fallback-list field), e.g.
    `{"model": "auto", "models": ["groq/llama-3.3-70b-versatile", "ds/deepseek-chat"]}`;
-2. `settings.autoModels`, e.g. `mini-router settings 'autoModels=["groq/llama-3.3-70b-versatile","ds/deepseek-chat"]'`;
+2. `settings.autoModels`, e.g. `zilong-router settings 'autoModels=["groq/llama-3.3-70b-versatile","ds/deepseek-chat"]'`;
 3. otherwise every model of every provider with an active account: catalogue models,
    models added on the provider page, and for endpoints with neither (OpenAI/Anthropic
    compatible nodes) the list from their `GET /models`, cached for 30 minutes. Each
@@ -78,7 +83,7 @@ starts one model further down the list (after `stickyRoundRobinLimit` requests o
 same one) and the rest stay as fallbacks; with it off, `auto` always starts at the top.
 
 Requests from the Pi itself need no key. Requests from the LAN need one, and you can
-force keys everywhere with `mini-router settings requireApiKey=true`.
+force keys everywhere with `zilong-router settings requireApiKey=true`.
 
 ## Sign-in (OAuth) and free providers
 
@@ -159,9 +164,9 @@ Pages, matching upstream's sidebar:
 - **Import from 9router** (Settings card, also in the header menu): upload the JSON from
   9router's *Settings → Download Backup*, its `~/.9router/db/data.sqlite`, or a legacy
   `~/.9router/db.json`. A preview lists the accounts per provider, API keys, custom
-  models, aliases and settings found, and which providers mini-router can't use (those
+  models, aliases and settings found, and which providers zilong-router can't use (those
   accounts are skipped). Rows are merged by id, so nothing here is deleted and importing
-  twice is harmless. Custom endpoints are converted to mini-router's form; the old
+  twice is harmless. Custom endpoints are converted to zilong-router's form; the old
   dashboard password and *Require login* are never imported.
 - **Settings**: Local Mode card with theme switcher, a Database card (storage mode,
   location, size and, with Turso, online / offline / connecting, last sync, last error
@@ -170,10 +175,10 @@ Pages, matching upstream's sidebar:
   limit), logout. The sidebar foot shows the database state at all times (refreshed
   every 30s) and links to the Database card.
 
-Upstream features that mini-router does not implement are left out of the sidebar
+Upstream features that zilong-router does not implement are left out of the sidebar
 rather than shown dead: Combos, Quota Tracker, Token Saver, CLI Tools, Media
 Providers, Proxy Pools, Skills, tunnels and SSO. Model aliases are managed with the
-CLI (`mini-router alias`).
+CLI (`zilong-router alias`).
 
 Fonts and icons (Inter and Material Symbols) load from Google Fonts like upstream;
 without internet the UI falls back to system fonts and shows icon names as text.
@@ -189,9 +194,9 @@ random secret persisted to `$DATA_DIR/jwt-secret`.
 ## Operations
 
 ```sh
-mini-router connection list          # shows cooldown state and the last error
-mini-router connection unlock --all  # clear cooldowns
-mini-router settings fallbackStrategy=round-robin stickyRoundRobinLimit=3
+zilong-router connection list          # shows cooldown state and the last error
+zilong-router connection unlock --all  # clear cooldowns
+zilong-router settings fallbackStrategy=round-robin stickyRoundRobinLimit=3
 curl -s localhost:20128/api/health
 ```
 
@@ -242,10 +247,10 @@ Requests keep using the local SQLite file, so latency is unaffected. With Turso
 configured the router also mirrors the database to a hosted libSQL instance:
 
 ```sh
-turso db create mini-router
-turso db show mini-router --url          # libsql://mini-router-<org>.turso.io
-turso db tokens create mini-router
-export TURSO_DATABASE_URL=libsql://mini-router-<org>.turso.io
+turso db create zilong-router
+turso db show zilong-router --url        # libsql://zilong-router-<org>.turso.io
+turso db tokens create zilong-router
+export TURSO_DATABASE_URL=libsql://zilong-router-<org>.turso.io
 export TURSO_AUTH_TOKEN=...
 ```
 
@@ -273,7 +278,7 @@ opens, and every sync interval (plus once on clean shutdown) pushes changes back
   until the restore succeeds, so an outage cannot wipe the remote copy.
 - Power loss or a crash loses up to one sync interval; lower `TURSO_SYNC_SECS` (e.g. 10)
   to shrink that window at the cost of more row writes.
-- The `mini-router` CLI subcommands cannot work against an in-memory database; use the
+- The `zilong-router` CLI subcommands cannot work against an in-memory database; use the
   dashboard.
 
 ## License

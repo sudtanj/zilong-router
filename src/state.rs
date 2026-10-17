@@ -50,7 +50,7 @@ impl AppState {
             .pool_idle_timeout(Duration::from_secs(90))
             .pool_max_idle_per_host(4)
             .tcp_keepalive(Duration::from_secs(60))
-            .user_agent(concat!("mini-router/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("zilong-router/", env!("CARGO_PKG_VERSION")))
             .use_rustls_tls();
         if let Some(p) = cfg.outbound_proxy.as_deref().filter(|p| !p.is_empty()) {
             http = http.proxy(reqwest::Proxy::all(p)?);

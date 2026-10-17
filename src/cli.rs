@@ -1,4 +1,4 @@
-//! Command line: `mini-router` serves; subcommands manage accounts, client API keys
+//! Command line: `zilong-router` serves; subcommands manage accounts, client API keys
 //! and model aliases directly in the SQLite file, mirroring the dashboard.
 
 use clap::{Parser, Subcommand};
@@ -9,7 +9,7 @@ use crate::db::{Db, ProviderConnection};
 use crate::providers::Registry;
 
 #[derive(Parser, Debug)]
-#[command(name = "mini-router", version, about = "Lightweight AI API router")]
+#[command(name = "zilong-router", version, about = "Lightweight AI API router")]
 pub struct Cli {
     #[command(flatten)]
     pub cfg: Config,
@@ -30,7 +30,7 @@ pub enum Cmd {
     /// Manage provider accounts (API keys for upstream providers).
     #[command(subcommand)]
     Connection(ConnCmd),
-    /// Manage client API keys (what your coding tool sends to mini-router).
+    /// Manage client API keys (what your coding tool sends to zilong-router).
     #[command(subcommand)]
     Apikey(KeyCmd),
     /// Manage model aliases ("fast" -> "groq/llama-3.3-70b-versatile").

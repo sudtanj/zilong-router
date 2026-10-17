@@ -47,13 +47,13 @@ jobs:
       - name: Package
         run: |
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/mini-router dist/
+          cp target/${{ matrix.target }}/release/zilong-router dist/
           cp -r deploy README.md dist/
-          tar -C dist -czf mini-router-${{ matrix.target }}.tar.gz .
+          tar -C dist -czf zilong-router-${{ matrix.target }}.tar.gz .
       - uses: actions/upload-artifact@v4
         with:
-          name: mini-router-${{ matrix.target }}
-          path: mini-router-${{ matrix.target }}.tar.gz
+          name: zilong-router-${{ matrix.target }}
+          path: zilong-router-${{ matrix.target }}.tar.gz
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')

@@ -1,4 +1,4 @@
-/* mini-router dashboard. A dependency-free port of 9router's Next.js dashboard:
+/* zilong-router dashboard. A dependency-free port of 9router's Next.js dashboard:
    same layout, pages, components and copy, backed by /api/admin. */
 (() => {
 'use strict';
@@ -256,8 +256,8 @@ const donateCard = (c) => `<div class="donate-card">
     : `<a class="btn sm donate-open" style="background:${c.color}" href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">Open${ms('open_in_new', 16)}</a>`}
   </div>`;
 actions.donate = () => openModal({
-  title: 'Support mini-router', size: 'wide',
-  body: `<p class="sm muted center" style="margin-bottom:24px">mini-router is free and open source. If it saves you time or money, consider supporting its development.</p>
+  title: 'Support zilong-router', size: 'wide',
+  body: `<p class="sm muted center" style="margin-bottom:24px">zilong-router is free and open source. If it saves you time or money, consider supporting its development.</p>
     <div class="donate-grid">${DONATE.map(donateCard).join('')}</div>`,
 });
 
@@ -318,7 +318,7 @@ const autoCard = (a, origin) => {
       <h2 class="ct">${ms('auto_awesome')}Auto model</h2>
       <button class="btn ghost" data-act="editAuto">${ms('tune')}Configure</button>
     </div>
-    <p class="sm muted mb4">Use model <code>auto</code> (like OpenRouter's <code>openrouter/auto</code>) and mini-router sends the request to the first model that answers, skipping accounts that are cooling down. The model that answered is returned in the <code>x-mini-router-model</code> response header.</p>
+    <p class="sm muted mb4">Use model <code>auto</code> (like OpenRouter's <code>openrouter/auto</code>) and zilong-router sends the request to the first model that answers, skipping accounts that are cooling down. The model that answered is returned in the <code>x-zilong-router-model</code> response header.</p>
     <div class="col gap2">
       <div class="row"><span class="codepill">Model</span><input class="input mono grow" value="auto" readonly>
         <button class="tiny" data-act="copy" data-text="auto" title="Copy">${ms('content_copy', 18)}</button></div>
@@ -799,7 +799,7 @@ actions.oauthLogin = async ({provider}) => {
   });
   // If the redirect does reach this router (browser on the same machine), finish by itself.
   try {
-    channel = new BroadcastChannel('mini-router-oauth');
+    channel = new BroadcastChannel('zilong-router-oauth');
     channel.onmessage = (e) => { const t = $('textarea[name=callback]', m.form); if (t && !t.value) { t.value = e.data; m.form.requestSubmit(); } };
   } catch (_) {}
 };
@@ -809,7 +809,7 @@ function oauthDevice(provider, name, s, done) {
   const link = s.verificationUriComplete || s.verificationUri;
   const m = openModal({
     title: 'Sign in with ' + name,
-    body: `<p class="sm muted mb4">Open the page below, sign in and enter this code to approve mini-router.</p>
+    body: `<p class="sm muted mb4">Open the page below, sign in and enter this code to approve zilong-router.</p>
       <div class="row gap2 mb4"><input class="input mono grow" style="font-size:20px;text-align:center;letter-spacing:2px" value="${esc(s.userCode || '')}" readonly>
         <button type="button" class="tiny" data-act="copy" data-text="${esc(s.userCode || '')}" title="Copy">${ms('content_copy', 18)}</button></div>
       <a class="btn primary full mb4" href="${esc(link)}" target="_blank" rel="noopener">${ms('open_in_new')}Open ${esc(link.replace(/^https?:\/\//, '').replace(/[?#].*/, ''))}</a>
@@ -1040,7 +1040,7 @@ async function previewImport(file) {
         ${opt('providers', `Providers: ${p.connections} account${p.connections === 1 ? '' : 's'}`, `${provs.length ? provs.map(([k, n]) => `${esc(k)} ×${n}`).join(', ') : 'none'}${p.customModels || p.aliases ? ` · ${p.customModels} custom model${p.customModels === 1 ? '' : 's'}, ${p.aliases} alias${p.aliases === 1 ? '' : 'es'}` : ''}`, true, p.connections + p.customModels + p.aliases)}
         ${opt('keys', `API keys: ${p.keys}`, 'Clients keep working with their existing keys.', true, p.keys)}
         ${opt('settings', `Settings: ${p.settings} value${p.settings === 1 ? '' : 's'}`, 'Routing strategy, sticky limit, per-provider overrides and the like. The dashboard password and Require login stay as they are here.', false, p.settings)}
-        ${skipped.length ? `<div class="warn-box">${ms('info', 16)}<p class="grow sm">Not imported, mini-router does not support these providers: ${skipped.map(([k, n]) => `${esc(k)} ×${n}`).join(', ')}.</p></div>` : ''}
+        ${skipped.length ? `<div class="warn-box">${ms('info', 16)}<p class="grow sm">Not imported, zilong-router does not support these providers: ${skipped.map(([k, n]) => `${esc(k)} ×${n}`).join(', ')}.</p></div>` : ''}
       </div>`,
     footer: nothing ? '<button type="button" class="btn ghost full" data-close>Nothing to import</button>' : twoButtons('Import'),
     onSubmit: async (f) => {
@@ -1126,7 +1126,7 @@ pages.profile = async () => {
     <div class="row gap2 wrap">
       <button class="btn outline full" data-act="logout" style="flex:1">${ms('logout')}Logout</button>
     </div>
-    <div class="center xs muted" style="padding:16px 0"><p>mini-router v${esc(session.version || '')}</p><p class="mt1">${db.mode === 'local' ? 'Local Mode - All data stored on your machine' : 'Data stored on your machine and on Turso'}</p></div>
+    <div class="center xs muted" style="padding:16px 0"><p>zilong-router v${esc(session.version || '')}</p><p class="mt1">${db.mode === 'local' ? 'Local Mode - All data stored on your machine' : 'Data stored on your machine and on Turso'}</p></div>
   </div></div>`;
 };
 actions.setTheme = ({v}) => { theme.set(v); $$('.theme-seg button').forEach((b) => b.classList.toggle('on', b.dataset.v === v)); };

@@ -1,4 +1,4 @@
-mini-router licensing
+zilong-router licensing
 =====================
 
 This repository contains two layers of work, under different terms.
@@ -28,7 +28,7 @@ This repository contains two layers of work, under different terms.
    https://github.com/sudtanj (GitHub profile / sponsors page).
 
 2. Upstream-derived code: MIT License
-   mini-router is derived from 9router (https://github.com/decolua/9router),
+   zilong-router is derived from 9router (https://github.com/decolua/9router),
    Copyright (c) 2024-2026 decolua and contributors. The portions derived
    from 9router (the provider definitions, pricing and icons in data/, the
    routing, fallback and translation rules, the dashboard UI and its copy,

@@ -166,7 +166,7 @@ mod tests {
 
     #[test]
     fn key_shape() {
-        let cfg = Config::parse_from(["mini-router"]);
+        let cfg = Config::parse_from(["zilong-router"]);
         let k = generate_key(&cfg, "0123456789abcdef");
         let parts: Vec<_> = k.split('-').collect();
         assert_eq!(parts[0], "sk");

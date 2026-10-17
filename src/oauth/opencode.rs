@@ -5,7 +5,7 @@
 //!
 //! Chat models use `/inference/v1/chat/completions`, `union-alpha` uses the Anthropic
 //! `/inference/v1/messages`. The Muse Spark models need the OpenAI Responses API,
-//! which mini-router does not speak, so they are dropped from the catalogue.
+//! which zilong-router does not speak, so they are dropped from the catalogue.
 
 use std::collections::HashMap;
 use std::sync::LazyLock;

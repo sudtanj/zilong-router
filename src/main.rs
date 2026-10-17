@@ -1,4 +1,4 @@
-//! mini-router: a small, single-binary AI API router.
+//! zilong-router: a small, single-binary AI API router.
 //!
 //! One OpenAI / Anthropic / Gemini-style request in, any configured provider out,
 //! with multi-account fallback, cooldowns, usage accounting and an embedded dashboard.
@@ -37,6 +37,16 @@ use crate::config::Config;
 use crate::state::AppState;
 
 fn main() -> anyhow::Result<()> {
+    // Renamed from mini-router: honour the old variable names when the new ones are unset.
+    // Still single-threaded here, so setting the environment is safe.
+    for (new, old) in [("ZILONG_ROUTER_CONFIG", "MINI_ROUTER_CONFIG"), ("ZILONG_ROUTER_WORKERS", "MINI_ROUTER_WORKERS")]
+    {
+        if std::env::var_os(new).is_none() {
+            if let Some(v) = std::env::var_os(old) {
+                std::env::set_var(new, v);
+            }
+        }
+    }
     let cli = cli::Cli::parse();
     let cfg = cli.cfg.clone().finalize()?;
     if cli::run(&cli::Cli { cfg: cfg.clone(), cmd: cli.cmd })? {
@@ -69,7 +79,7 @@ async fn run(cfg: Config) -> anyhow::Result<()> {
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(
-        "mini-router v{} listening on http://{}  (dashboard: /dashboard, API: /v1)",
+        "zilong-router v{} listening on http://{}  (dashboard: /dashboard, API: /v1)",
         env!("CARGO_PKG_VERSION"),
         addr
     );

@@ -33,7 +33,7 @@ fn model_entries(state: &AppState, caller: &Caller, opencode_free: &[String]) ->
         "id": "auto",
         "object": "model",
         "created": created,
-        "owned_by": "mini-router",
+        "owned_by": "zilong-router",
         "name": "Auto (first available model)",
     })];
     for p in state.registry.all() {

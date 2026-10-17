@@ -178,7 +178,9 @@ async fn handle_inner(
         match attempt(&state, &req, &c, &label).await {
             Ok(mut resp) => {
                 if let Ok(v) = header::HeaderValue::from_str(&label) {
-                    resp.headers_mut().insert("x-mini-router-model", v);
+                    // Old name kept for clients written before the rename.
+                    resp.headers_mut().insert("x-mini-router-model", v.clone());
+                    resp.headers_mut().insert("x-zilong-router-model", v);
                 }
                 return Ok(resp);
             }
@@ -362,7 +364,7 @@ async fn attempt(
                     return Err(match last_err {
                         Some((status, m)) => ApiError::new(if status >= 500 { 502 } else { status }, source, format!("[{}/{}] {m}", provider.id, resolved.model)),
                         None if tried == 0 => ApiError::new(404, source, format!(
-                            "No active credentials for provider '{}'. Add one with: mini-router connection add {} <api-key>",
+                            "No active credentials for provider '{}'. Add one with: zilong-router connection add {} <api-key>",
                             provider.id, provider.id
                         )),
                         None => ApiError::new(503, source, "all accounts failed"),

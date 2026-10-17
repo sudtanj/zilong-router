@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Converts the upstream 9router provider registry + pricing tables into the JSON
-// files embedded by mini-router. Runs on a dev machine or in CI (needs Node >= 20),
+// files embedded by zilong-router. Runs on a dev machine or in CI (needs Node >= 20),
 // never on the target board.
 //
 //   node tools/sync-upstream/convert.mjs [upstreamDir=.upstream/9router] [outDir=data]
@@ -28,7 +28,7 @@ if (!existsSync(src)) {
   process.exit(1);
 }
 
-const tmp = mkdtempSync(join(tmpdir(), "mini-router-upstream-"));
+const tmp = mkdtempSync(join(tmpdir(), "zilong-router-upstream-"));
 try {
   cpSync(src, join(tmp, "open-sse"), { recursive: true });
   writeFileSync(join(tmp, "package.json"), JSON.stringify({ type: "module" }));
@@ -44,7 +44,7 @@ try {
   // Providers whose upstream code has a dedicated executor (open-sse/executors/*.js);
   // they need Rust work beyond config and are filtered out for now.
   const SPECIAL_EXECUTORS = new Set(["antigravity","azure","bedrock","bedrock-xai","codebuddy-cn","codebuddy-intl","codex","commandcode","cursor","devin-cli","gemini-cli","github","grok-cli","grok-web","iflow","kimchi","kiro","mimo-free","minimax-code","minimax-code-global","ollama-local","opencode","opencode-go","opencode-zen","perplexity-web","qoder","qoder-cn","trae","vertex","vertex-partner","windsurf","xiaomi-mimo","xiaomi-tokenplan","zed"]);
-  // Upstream-special providers mini-router implements natively (src/oauth): their
+  // Upstream-special providers zilong-router implements natively (src/oauth): their
   // sign-in, token refresh and request quirks are ported, so keep them.
   const RISK_NOTICE = "⚠️ Risk Notice: This provider uses a subscription/OAuth session not officially licensed for proxy/router use. Account may be restricted or banned. Use at your own risk.";
   const NATIVE = new Set(["claude", "cline", "clinepass", "github", "kilocode", "kimi", "mimo-free", "minimax-code", "minimax-code-global", "muse", "nous", "opencode", "xai"]);

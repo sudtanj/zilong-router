@@ -1,0 +1,30 @@
+# systemd unit for zilong-router on an Orange Pi Zero 3 (or any Linux box).
+#   sudo cp zilong-router /usr/local/bin/ && sudo useradd -r -m -d /var/lib/zilong-router zilong-router
+#   sudo cp deploy/zilong-router.service /etc/systemd/system/ && sudo systemctl enable --now zilong-router
+[Unit]
+Description=zilong-router AI API router
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=zilong-router
+Group=zilong-router
+Environment=DATA_DIR=/var/lib/zilong-router
+Environment=HOSTNAME=0.0.0.0
+Environment=PORT=20128
+Environment=RUST_LOG=info
+# Uncomment to force a key even from localhost:
+# Environment=REQUIRE_API_KEY=true
+ExecStart=/usr/local/bin/zilong-router
+Restart=on-failure
+RestartSec=3
+# Memory guard: the router idles far below this; the limit protects the board.
+MemoryMax=128M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/zilong-router
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -11,7 +11,7 @@ use clap::Parser;
 use serde::Deserialize;
 
 #[derive(Parser, Debug, Clone)]
-#[command(name = "mini-router")]
+#[command(name = "zilong-router")]
 pub struct Config {
     /// Address to bind. Use 0.0.0.0 to serve the LAN.
     #[arg(long, env = "HOSTNAME", default_value = "127.0.0.1")]
@@ -27,7 +27,7 @@ pub struct Config {
     pub data_dir: Option<PathBuf>,
 
     /// Optional TOML config file.
-    #[arg(long, short, env = "MINI_ROUTER_CONFIG")]
+    #[arg(long, short, env = "ZILONG_ROUTER_CONFIG")]
     pub config: Option<PathBuf>,
 
     /// Password accepted for the dashboard until one is saved in settings.
@@ -52,7 +52,7 @@ pub struct Config {
     pub require_api_key: bool,
 
     /// Tokio worker threads.
-    #[arg(long, env = "MINI_ROUTER_WORKERS", default_value_t = 2)]
+    #[arg(long, env = "ZILONG_ROUTER_WORKERS", default_value_t = 2)]
     pub workers: usize,
 
     /// Log filter (tracing EnvFilter syntax) when RUST_LOG is unset.
@@ -130,7 +130,7 @@ impl Config {
             let f: FileConfig = toml::from_str(&text)?;
             // CLI/env values win because clap already applied them; only fill the
             // fields the user left at their defaults.
-            let d = Config::parse_from(["mini-router"]);
+            let d = Config::parse_from(["zilong-router"]);
             macro_rules! take {
                 ($field:ident) => {
                     if let Some(v) = f.$field {

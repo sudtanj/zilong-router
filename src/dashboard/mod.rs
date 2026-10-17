@@ -40,6 +40,7 @@ pub fn session_secret(cfg: &Config) -> String {
     }
     if cfg.turso_only {
         // No disk to persist a random secret on; derive a stable one from the Turso token.
+        // Keeps the pre-rename label: changing it would invalidate the stored password hash.
         return sign(cfg.turso_token.as_deref().unwrap_or_default(), "mini-router-session-secret");
     }
     let p = cfg.resolved_data_dir.join("jwt-secret");
@@ -229,7 +230,7 @@ async fn style_css() -> Response {
 
 async fn info() -> impl IntoResponse {
     Json(json!({
-        "name": "mini-router",
+        "name": "zilong-router",
         "version": env!("CARGO_PKG_VERSION"),
         "openai_base_url": "/v1",
         "anthropic_base_url": "/v1",
@@ -277,12 +278,12 @@ async fn provider_icon(axum::extract::Path(file): axum::extract::Path<String>) -
 async fn oauth_callback() -> Response {
     static_response(
         "text/html; charset=utf-8",
-        r#"<!doctype html><meta charset="utf-8"><title>mini-router sign-in</title>
+        r#"<!doctype html><meta charset="utf-8"><title>zilong-router sign-in</title>
 <body style="font:15px system-ui;margin:40px;max-width:640px">
 <h3>Sign-in finished</h3><p id="m">Sending the result back to the dashboard…</p>
 <script>
-try { new BroadcastChannel('mini-router-oauth').postMessage(location.href); } catch (e) {}
-try { localStorage.setItem('mini-router-oauth', JSON.stringify({url: location.href, at: Date.now()})); } catch (e) {}
+try { new BroadcastChannel('zilong-router-oauth').postMessage(location.href); } catch (e) {}
+try { localStorage.setItem('zilong-router-oauth', JSON.stringify({url: location.href, at: Date.now()})); } catch (e) {}
 document.getElementById('m').textContent = 'You can close this tab. If the dashboard does not continue, paste this address into it: ' + location.href;
 </script>"#,
     )

@@ -1,4 +1,4 @@
-/* mini-router dashboard: hand-written port of 9router's Tailwind theme (globals.css + shared components). */
+/* zilong-router dashboard: hand-written port of 9router's Tailwind theme (globals.css + shared components). */
 :root{
   --brand-50:#fdf1ed;--brand-100:#fadccf;--brand-200:#f4b59c;--brand-300:#ee8d6a;--brand-400:#ea7855;--brand-500:#E56A4A;--brand-600:#cc5236;--brand-700:#a64027;
   --primary:#E56A4A;--primary-hover:#cc5236;

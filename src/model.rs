@@ -83,9 +83,13 @@ pub fn resolve(
     Resolved { provider: infer_provider(s).to_string(), model: s.to_string(), pinned_connection: None }
 }
 
-/// `auto` (also `mini-router/auto`): let the router pick any available model.
+/// `auto` (also `zilong-router/auto`, or `mini-router/auto` from before the rename):
+/// let the router pick any available model.
 pub fn is_auto(raw: &str) -> bool {
-    matches!(strip_context_marker(raw).to_ascii_lowercase().as_str(), "auto" | "mini-router/auto")
+    matches!(
+        strip_context_marker(raw).to_ascii_lowercase().as_str(),
+        "auto" | "zilong-router/auto" | "mini-router/auto"
+    )
 }
 
 /// Ordered candidates for `auto`.
@@ -243,7 +247,12 @@ mod tests {
         let r = Registry::load(None).unwrap();
         let aliases = serde_json::Map::new();
         let none = serde_json::Map::new();
-        assert!(is_auto("auto") && is_auto("mini-router/auto") && !is_auto("openrouter/auto"));
+        assert!(
+            is_auto("auto")
+                && is_auto("zilong-router/auto")
+                && is_auto("mini-router/auto")
+                && !is_auto("openrouter/auto")
+        );
 
         let explicit = ["ds/deepseek-chat".to_string(), "auto".to_string(), "gpt-4o".to_string()];
         let c = auto_candidates(&r, &aliases, &[], &explicit, &none, &HashMap::new());

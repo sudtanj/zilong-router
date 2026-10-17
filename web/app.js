@@ -241,6 +241,26 @@ actions.copy = async ({text}, b) => {
   const lbl = $('.lbl', b); if (lbl) { const old = lbl.textContent; lbl.textContent = 'Copied!'; setTimeout(() => (lbl.textContent = old), 2000); }
 };
 
+// ----- Donate (upstream DonateModal; channels are the maintainer's own) -----------
+const DONATE = [
+  {label: 'PayPal', icon: 'payments', color: '#0070BA', description: 'One-off donation via PayPal', url: 'https://www.paypal.me/sudtanj'},
+  {label: 'Bitcoin', icon: 'currency_bitcoin', color: '#F7931A', description: 'Send BTC to this address', address: '32Ja5bcaAAYXFjKCRmcYe3SM2RsSUCmXtQ'},
+  {label: 'GitHub', icon: 'favorite', color: '#DB61A2', description: 'Follow and star the projects', url: 'https://github.com/sudtanj'},
+];
+const donateCard = (c) => `<div class="donate-card">
+    <div class="donate-ico" style="background:${c.color}20;color:${c.color}">${ms(c.icon, 26)}</div>
+    <p class="semibold">${esc(c.label)}</p>
+    <p class="xs muted center">${esc(c.description)}</p>
+    ${c.address ? `<button type="button" class="donate-addr mono" data-act="copy" data-text="${esc(c.address)}" title="Copy address"><span class="lbl">${esc(c.address)}</span>${ms('content_copy', 14)}</button>
+      <a class="btn sm donate-open" style="background:${c.color}" href="bitcoin:${esc(c.address)}">Open wallet${ms('open_in_new', 16)}</a>`
+    : `<a class="btn sm donate-open" style="background:${c.color}" href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">Open${ms('open_in_new', 16)}</a>`}
+  </div>`;
+actions.donate = () => openModal({
+  title: 'Support mini-router', size: 'wide',
+  body: `<p class="sm muted center" style="margin-bottom:24px">mini-router is free and open source. If it saves you time or money, consider supporting its development.</p>
+    <div class="donate-grid">${DONATE.map(donateCard).join('')}</div>`,
+});
+
 // ----- Endpoint & Key (upstream EndpointPageClient) -------------------------------
 let keyCache = [], settingsCache = {}, visibleKeys = new Set();
 pages.endpoint = async () => {

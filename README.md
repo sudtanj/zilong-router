@@ -29,7 +29,8 @@ Orange Pi Zero 3:
 
 Not (yet) included: Gemini wire format, model combos, the Responses API, embeddings,
 image/audio, and providers that need IDE-impersonation executors (Cursor, Windsurf, Kiro
-…). Providers that need those are listed in `data/skipped.json` after each sync.
+…); see the [Roadmap](#roadmap). Providers that need those are listed in
+`data/skipped.json` after each sync.
 
 ## Install on the Orange Pi
 
@@ -286,6 +287,26 @@ opens, and every sync interval (plus once on clean shutdown) pushes changes back
   to shrink that window at the cost of more row writes.
 - The `zilong-router` CLI subcommands cannot work against an in-memory database; use the
   dashboard.
+
+## Roadmap
+
+Planned, roughly in order of interest. Nothing here is implemented yet.
+
+- **MCP gateway (meta tools).** One MCP endpoint that fronts many MCP servers, so a coding
+  tool connects once instead of configuring each server:
+  - register upstream MCP servers (stdio command or Streamable HTTP/SSE URL) from the
+    dashboard, with per-server enable/disable and credentials;
+  - a small set of meta tools (for example search tools, describe a tool, call a tool)
+    so the client sees a few tools instead of hundreds, keeping prompts short;
+  - tool names namespaced per server to avoid clashes, and per-API-key access control;
+  - calls and errors logged next to LLM usage in the dashboard;
+  - stdio servers started on demand and stopped when idle, to fit in 1 GB.
+- Gemini wire format (`/v1beta/models/...:generateContent`).
+- OpenAI Responses API (`/v1/responses`).
+- Model combos (one name that falls back through a list of provider/model pairs).
+- Embeddings, image and audio endpoints.
+- Providers that need IDE-impersonation executors (Cursor, Windsurf, Kiro, Codex,
+  Gemini CLI …).
 
 ## License
 

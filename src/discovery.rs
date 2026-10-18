@@ -57,6 +57,22 @@ pub async fn auto_candidates(
     out
 }
 
+/// The saved candidate list: `settings.autoModels` for `auto`, `settings.autoStrongModels`
+/// for `auto-strong`. Empty means "every model of every account" (filtered by strength
+/// for `auto-strong`).
+pub fn saved_auto_models(state: &AppState, strong: bool) -> Vec<String> {
+    let key = if strong { "autoStrongModels" } else { "autoModels" };
+    state
+        .db
+        .settings()
+        .get(key)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|m| m.as_str().map(str::to_string))
+        .collect()
+}
+
 /// "Refresh models" on a provider page: the provider's live model list, fetched now
 /// (the cache is updated too). OpenCode Free needs no account; anything else lists
 /// through `conn`.

@@ -537,59 +537,66 @@ pub async fn delete_alias(State(state): S, Path(alias): Path<String>) -> R {
 
 // ----- auto model ----------------------------------------------------------------
 
-/// What `model: "auto"` would try right now, in order, and whether each candidate
-/// has an account that is not cooling down.
+/// What `model: "auto"` and `model: "auto-strong"` would try right now, in order, and
+/// whether each candidate has an account that is not cooling down.
 pub async fn auto_preview(State(state): S) -> R {
-    let settings = state.db.settings();
-    let explicit: Vec<String> = settings
-        .get("autoModels")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|m| m.as_str().map(str::to_string))
-        .collect();
+    let explicit = crate::discovery::saved_auto_models(&state, false);
+    let strong_explicit = crate::discovery::saved_auto_models(&state, true);
     let aliases = state.db.kv_scope("modelAliases")?;
     let conns = state.db.all_connections()?;
     let now = OffsetDateTime::now_utc();
-    let candidates: Vec<Value> = crate::discovery::auto_candidates(&state, &aliases, &conns, &explicit)
-        .await
-        .into_iter()
-        .take(60)
-        .map(|c| {
-            let p = state.registry.get(&c.provider);
-            let supported = p
-                .and_then(|p| p.transport_for(crate::providers::Format::Openai, &c.model))
-                .map(|t| t.format.supported())
-                .unwrap_or(false);
-            let accounts: Vec<&ProviderConnection> = conns
-                .iter()
-                .filter(|a| a.provider == c.provider && a.is_active)
-                .filter(|a| c.pinned_connection.as_deref().map_or(true, |id| a.id == id))
-                .collect();
-            let node = c.pinned_connection.as_ref().and_then(|_| accounts.first().copied());
-            let prefix = node
-                .and_then(crate::model::connection_prefix)
-                .or(p.map(|p| p.alias.as_str()))
-                .unwrap_or(&c.provider)
-                .to_string();
-            let provider_name =
-                node.map(|n| n.label()).unwrap_or_else(|| p.map(|p| p.name()).unwrap_or(&c.provider).to_string());
-            let no_auth = p.map(|p| p.no_auth).unwrap_or(false);
-            let free = accounts.iter().any(|a| crate::router::active_lock_until(a, &c.model, now).is_none());
-            json!({
-                "model": format!("{prefix}/{}", c.model),
-                "provider": c.provider,
-                "providerName": provider_name,
-                "accounts": accounts.len(),
-                "supported": supported,
-                "ready": supported && (no_auth || free),
-            })
+    let auto = crate::discovery::auto_candidates(&state, &aliases, &conns, &explicit).await;
+    let strong = if !strong_explicit.is_empty() {
+        crate::discovery::auto_candidates(&state, &aliases, &conns, &strong_explicit).await
+    } else {
+        let mut all = if explicit.is_empty() {
+            auto.clone()
+        } else {
+            crate::discovery::auto_candidates(&state, &aliases, &conns, &[]).await
+        };
+        crate::model::strongest_first(&mut all);
+        all
+    };
+    let describe = |c: crate::model::Resolved| {
+        let p = state.registry.get(&c.provider);
+        let supported = p
+            .and_then(|p| p.transport_for(crate::providers::Format::Openai, &c.model))
+            .map(|t| t.format.supported())
+            .unwrap_or(false);
+        let accounts: Vec<&ProviderConnection> = conns
+            .iter()
+            .filter(|a| a.provider == c.provider && a.is_active)
+            .filter(|a| c.pinned_connection.as_deref().map_or(true, |id| a.id == id))
+            .collect();
+        let node = c.pinned_connection.as_ref().and_then(|_| accounts.first().copied());
+        let prefix = node
+            .and_then(crate::model::connection_prefix)
+            .or(p.map(|p| p.alias.as_str()))
+            .unwrap_or(&c.provider)
+            .to_string();
+        let provider_name =
+            node.map(|n| n.label()).unwrap_or_else(|| p.map(|p| p.name()).unwrap_or(&c.provider).to_string());
+        let no_auth = p.map(|p| p.no_auth).unwrap_or(false);
+        let free = accounts.iter().any(|a| crate::router::active_lock_until(a, &c.model, now).is_none());
+        json!({
+            "model": format!("{prefix}/{}", c.model),
+            "provider": c.provider,
+            "providerName": provider_name,
+            "accounts": accounts.len(),
+            "supported": supported,
+            "ready": supported && (no_auth || free),
+            "strength": crate::model::strength(&c.model),
         })
-        .collect();
+    };
+    let candidates: Vec<Value> = auto.into_iter().take(60).map(&describe).collect();
+    let strong_candidates: Vec<Value> = strong.into_iter().take(60).map(&describe).collect();
     Ok(Json(json!({
         "source": if explicit.is_empty() { "accounts" } else { "autoModels" },
         "autoModels": explicit,
         "candidates": candidates,
+        "strongSource": if strong_explicit.is_empty() { "accounts" } else { "autoStrongModels" },
+        "autoStrongModels": strong_explicit,
+        "strongCandidates": strong_candidates,
     })))
 }
 

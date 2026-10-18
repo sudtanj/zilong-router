@@ -309,11 +309,13 @@ const autoCard = (a, origin) => {
   const example = `curl ${origin}/v1/chat/completions \\
   -H "Authorization: Bearer <api-key>" -H "Content-Type: application/json" \\
   -d '{"model":"auto","messages":[{"role":"user","content":"Hello"}]}'`;
-  const rows = a.candidates.slice(0, 12).map((c, i) => `<div class="row between" style="padding:4px 0">
+  const candRows = (list) => list.slice(0, 12).map((c, i) => `<div class="row between" style="padding:4px 0">
       <span class="sm"><span class="muted">${i + 1}.</span> <code>${esc(c.model)}</code> <span class="xs muted">${esc(c.providerName)}</span></span>
       ${!c.supported ? '<span class="badge sm warning">format not supported</span>'
         : c.ready ? '<span class="badge sm success"><span class="dot"></span>ready</span>'
         : '<span class="badge sm error"><span class="dot"></span>cooling down</span>'}</div>`).join('');
+  const rows = candRows(a.candidates);
+  const strong = a.strongCandidates || [];
   return `<div class="card" id="auto-model">
     <div class="row between mb4">
       <h2 class="ct">${ms('auto_awesome')}Auto model</h2>
@@ -338,6 +340,10 @@ const autoCard = (a, origin) => {
     <p class="sm medium mt4 mb2">Order right now <span class="xs muted">(${a.source === 'autoModels' ? 'your list' : 'every model of every provider with an active account; endpoints without a catalogue are asked for their model list'}; tried in this order until one answers)</span></p>
     ${a.candidates.length ? `<div class="col">${rows}</div>${a.candidates.length > 12 ? `<p class="xs muted mt1">…and ${a.candidates.length - 12} more</p>` : ''}`
       : `<div class="warn-box">${ms('warning', 16)}<p class="grow">No candidates. Add a provider account, or check that your endpoint answers <code>GET /models</code> (otherwise add its models on the provider page).</p><a class="linkbtn" href="#/providers">Providers</a></div>`}
+    <p class="sm medium mt4 mb2">Strong models only: <code>auto-strong</code> <button class="tiny" data-act="copy" data-text="auto-strong" title="Copy">${ms('content_copy', 14)}</button></p>
+    <p class="xs muted mb2">For agents with many tools (kongming, Claude Code, coding agents): only model families known to call tools reliably (Claude, GPT-5 and o3, Gemini Pro and Flash, DeepSeek V3.1+, Qwen Max/Plus/Coder, Kimi, GLM 4.5+, MiniMax M2+, Grok 4…), strongest first. Small models (nano, lite, mini, under 100B) are left out. ${a.strongSource === 'autoStrongModels' ? 'Using your list.' : ''}</p>
+    ${strong.length ? `<div class="col">${candRows(strong)}</div>${strong.length > 12 ? `<p class="xs muted mt1">…and ${strong.length - 12} more</p>` : ''}`
+      : `<div class="warn-box">${ms('warning', 16)}<p class="grow">No strong model among your accounts. Add a provider with a strong model, or list models for auto-strong under Configure.</p><a class="linkbtn" href="#/providers">Providers</a></div>`}
   </div>`;
 };
 actions.editAuto = async () => {
@@ -346,10 +352,13 @@ actions.editAuto = async () => {
     title: 'Auto model',
     body: field('models', 'Models to try, in order (one per line)', {type: 'textarea', rows: 6, value: a.autoModels.join('\n'),
         placeholder: 'groq/llama-3.3-70b-versatile\nds/deepseek-chat', hint: 'Leave empty to use every model of every provider with an active account (compatible endpoints are asked for their model list).'})
+      + field('strongModels', 'Models for auto-strong, in order (one per line)', {type: 'textarea', rows: 4, value: (a.autoStrongModels || []).join('\n'),
+        placeholder: 'anthropic/claude-sonnet-4-6\nds/deepseek-chat', hint: 'Leave empty to use every strong model of every provider with an active account, strongest first.'})
       + twoButtons('Save'),
     onSubmit: async (f) => {
       const models = f.models.value.split('\n').map((s) => s.trim()).filter(Boolean);
-      await patch('/settings', {autoModels: models});
+      const strongModels = f.strongModels.value.split('\n').map((s) => s.trim()).filter(Boolean);
+      await patch('/settings', {autoModels: models, autoStrongModels: strongModels});
       notify('success', 'Auto model saved');
       reload();
     },

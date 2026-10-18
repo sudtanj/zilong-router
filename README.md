@@ -91,6 +91,20 @@ With **Round Robin** on in Settings (`fallbackStrategy: "round-robin"`), each re
 starts one model further down the list (after `stickyRoundRobinLimit` requests on the
 same one) and the rest stay as fallbacks; with it off, `auto` always starts at the top.
 
+Model `auto-strong` works the same way but only with models that hold up in agent work
+(long system prompts, dozens of tools, several tool rounds per answer), which is what
+agents like [kongming](https://github.com/sudtanj/kongming) or Claude Code need: a
+small model there tends to call the wrong tool or stop answering. Providers publish no
+capability data, so it goes by model family: Claude (Opus, Sonnet, Haiku 4.5), GPT-5,
+GPT-4.1/4o and o3, Gemini Pro and Flash (2.5+), Grok 4, DeepSeek V3.1+/V4, Qwen
+Max/Plus/Coder/235B+, Kimi, GLM 4.5+ and 5, MiniMax M2+, Mistral Large/Medium, MiMo,
+Seed Pro/Code, Nemotron Ultra/Super, gpt-oss-120b and Command A. Small variants
+(nano, lite, mini, air, distills, anything under 100B parameters) and unknown models
+are left out. Candidates are tried strongest first (frontier models, then strong, then
+capable); Round Robin rotates only among the strongest tier. To pick the models
+yourself, set `settings.autoStrongModels` (or *Configure* on the Auto model card); a
+request's `models` array also overrides it.
+
 Requests from the Pi itself need no key. Requests from the LAN need one, and you can
 force keys everywhere with `zilong-router settings requireApiKey=true`.
 

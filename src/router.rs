@@ -183,13 +183,15 @@ fn advance(entry: &mut RoundRobin, ids: &[&str], sticky: i64) -> usize {
     idx
 }
 
-/// Cursor key for `auto` in `AppState::rr` (provider ids never contain a space).
-const AUTO_RR_KEY: &str = "auto model";
+/// Cursor keys for `auto` and `auto-strong` in `AppState::rr` (provider ids never
+/// contain a space).
+pub const AUTO_RR_KEY: &str = "auto model";
+pub const AUTO_STRONG_RR_KEY: &str = "auto-strong model";
 
 /// `auto` follows the global Round Robin setting: each request starts at the next
 /// candidate (sticky for `stickyRoundRobinLimit` requests, like accounts) and the
 /// rest, in order, stay as fallbacks. Fill-first, the default, keeps the order.
-pub fn rotate_auto(state: &AppState, candidates: &mut [Resolved]) {
+pub fn rotate_auto(state: &AppState, candidates: &mut [Resolved], key: &str) {
     let settings = state.db.settings();
     if candidates.len() < 2 || settings.get("fallbackStrategy").and_then(Value::as_str) != Some("round-robin") {
         return;
@@ -197,7 +199,7 @@ pub fn rotate_auto(state: &AppState, candidates: &mut [Resolved]) {
     let sticky = settings.get("stickyRoundRobinLimit").and_then(Value::as_i64).unwrap_or(3).max(1);
     let labels: Vec<String> = candidates.iter().map(|c| format!("{}/{}", c.provider, c.model)).collect();
     let ids: Vec<&str> = labels.iter().map(String::as_str).collect();
-    let idx = advance(state.rr.lock().entry(AUTO_RR_KEY.to_string()).or_default(), &ids, sticky);
+    let idx = advance(state.rr.lock().entry(key.to_string()).or_default(), &ids, sticky);
     candidates.rotate_left(idx);
 }
 

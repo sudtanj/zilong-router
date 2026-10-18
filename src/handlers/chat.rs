@@ -148,18 +148,8 @@ async fn handle_inner(
 
     // `auto`: walk every candidate until one answers. Upstream errors only surface
     // before the first byte is sent, so moving on to the next model is always safe.
-    let settings = state.db.settings();
-    let explicit: Vec<String> = if requested.is_empty() {
-        settings
-            .get("autoModels")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(|m| m.as_str().map(str::to_string))
-            .collect()
-    } else {
-        requested
-    };
+    let strong = crate::model::is_auto_strong(&raw_model);
+    let explicit = if requested.is_empty() { crate::discovery::saved_auto_models(&state, strong) } else { requested };
     let mut candidates = crate::discovery::auto_candidates(&state, &aliases, &connections, &explicit).await;
     // Drop unusable models before rotating so round-robin only cycles real options.
     candidates.retain(|c| {
@@ -168,7 +158,13 @@ async fn handle_inner(
                 && p.transport_for(source, &c.model).map(|t| t.format.supported()).unwrap_or(false)
         })
     });
-    crate::router::rotate_auto(&state, &mut candidates);
+    if strong && explicit.is_empty() {
+        // Strongest tier first; round-robin spreads load across that tier only.
+        let top = crate::model::strongest_first(&mut candidates);
+        crate::router::rotate_auto(&state, &mut candidates[..top], crate::router::AUTO_STRONG_RR_KEY);
+    } else {
+        crate::router::rotate_auto(&state, &mut candidates, crate::router::AUTO_RR_KEY);
+    }
 
     let mut last: Option<ApiError> = None;
     let mut failures: Vec<String> = Vec::new();
@@ -206,6 +202,13 @@ async fn handle_inner(
                 format!("auto: all {} models failed. {more}{}", failures.len(), failures[skipped..].join(" | "));
             ApiError { message, ..e }
         }
+        None if strong => ApiError::new(
+            404,
+            source,
+            "auto-strong: no strong model is available. Add an account for a provider with strong models \
+             (Claude, GPT-5, Gemini Pro, DeepSeek, Qwen Max, Kimi, GLM, MiniMax…), \
+             or list models in settings.autoStrongModels",
+        ),
         None => ApiError::new(
             404,
             source,

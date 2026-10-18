@@ -83,10 +83,119 @@ pub fn resolve(
     Resolved { provider: infer_provider(s).to_string(), model: s.to_string(), pinned_connection: None }
 }
 
-/// `auto` (also `zilong-router/auto`):
+/// `auto` (also `zilong-router/auto`, and the `auto-strong` variants):
 /// let the router pick any available model.
 pub fn is_auto(raw: &str) -> bool {
-    matches!(strip_context_marker(raw).to_ascii_lowercase().as_str(), "auto" | "zilong-router/auto")
+    is_auto_strong(raw)
+        || matches!(strip_context_marker(raw).to_ascii_lowercase().as_str(), "auto" | "zilong-router/auto")
+}
+
+/// `auto-strong` (also `zilong-router/auto-strong`): like `auto`, but only models that
+/// cope with agent work (long system prompts, many tools, multi-step tool use).
+pub fn is_auto_strong(raw: &str) -> bool {
+    matches!(strip_context_marker(raw).to_ascii_lowercase().as_str(), "auto-strong" | "zilong-router/auto-strong")
+}
+
+/// How well a model handles agent work, from its id: 3 frontier, 2 strong, 1 capable,
+/// 0 unknown or too small. Providers publish no capability data, so this is a list of
+/// families known to call tools reliably; anything not on it is left out of
+/// `auto-strong` rather than guessed.
+pub fn strength(model: &str) -> u8 {
+    let last = model.rsplit('/').next().unwrap_or(model);
+    let id = last.split(':').next().unwrap_or(last).to_ascii_lowercase();
+    let id = id.as_str();
+    let has = |w: &str| id.contains(w);
+    let any = |ws: &[&str]| ws.iter().any(|&w| has(w));
+    if any(&["nano", "lite", "tiny", "-small", "-air", "distill"]) {
+        return 0;
+    }
+    if params_b(id).is_some_and(|b| b < 100) {
+        return 0;
+    }
+    let claude = has("claude");
+    let claude3 = has("claude-3");
+    let gpt5 = id.starts_with("gpt-5") || id.starts_with("gpt-6");
+    let o_series = id.len() >= 2 && id.starts_with('o') && id.as_bytes()[1].is_ascii_digit();
+    let gemini = has("gemini") && !has("gemini-1") && !has("gemini-2.0");
+    let deepseek = has("deepseek") && !has("r1");
+    let deepseek_next = deepseek && (has("v4") || has("v5"));
+    let qwen = has("qwen") && !has("qwq") && !has("qwen2");
+    // First match wins.
+    let rules: &[(bool, u8)] = &[
+        (claude && (has("opus") || has("fable")), 3),
+        (claude && has("sonnet") && !claude3, 3),
+        (claude && has("sonnet") && any(&["3-5", "3.5", "3-7", "3.7"]), 2),
+        (claude && has("haiku") && !claude3, 1),
+        (gpt5 && has("mini"), 1),
+        (gpt5, 3),
+        (id.starts_with("gpt-4.1") && !has("mini"), 2),
+        ((id.starts_with("gpt-4o") || id.starts_with("gpt-4-turbo")) && !has("mini"), 1),
+        (id.starts_with("gpt-oss"), 1),
+        (o_series && id.starts_with("o4") && has("mini"), 1),
+        (o_series && id.starts_with("o1") && !has("mini"), 2),
+        (o_series && !has("mini"), 3),
+        (gemini && has("pro"), 3),
+        (gemini && has("flash"), 2),
+        (has("grok-4") || has("grok-5"), 3),
+        (id.starts_with("grok-") && has("code"), 2),
+        (has("grok-3"), 1),
+        (deepseek_next && has("pro"), 3),
+        (deepseek_next, 2),
+        (deepseek && any(&["v3.1", "v3.2", "v3p1", "v3p2", "chat", "reasoner"]), 2),
+        (deepseek && has("v3"), 1),
+        (qwen && (has("max") || has("397b")), 3),
+        (qwen && has("coder") && any(&["480b", "plus", "next"]), 2),
+        (qwen && !has("coder") && (has("235b") || has("plus")), 2),
+        (has("kimi"), 3),
+        (has("glm") && has("flash"), 1),
+        (has("glm-5"), 3),
+        (any(&["glm-4.5", "glm-4.6", "glm-4.7", "glm-4-7"]), 2),
+        (has("minimax") && has("m3"), 3),
+        (has("minimax") && has("m2"), 2),
+        (any(&["mistral-large", "mistral-medium", "magistral-medium", "devstral"]), 2),
+        (has("mimo-v") && has("pro"), 2),
+        (has("mimo-v"), 1),
+        (has("seed") && (has("pro") || has("code")), 2),
+        (has("nemotron") && has("ultra"), 2),
+        (has("nemotron") && has("super"), 1),
+        (id.starts_with("command-a"), 1),
+    ];
+    rules.iter().find(|(hit, _)| *hit).map_or(0, |(_, tier)| *tier)
+}
+
+/// Largest "<n>b" parameter count in a model id ("qwen3-235b-a22b" -> 235).
+fn params_b(id: &str) -> Option<u64> {
+    let bytes = id.as_bytes();
+    let mut best = None;
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i].is_ascii_digit() && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'a') {
+            let start = i;
+            while i < bytes.len() && bytes[i].is_ascii_digit() {
+                i += 1;
+            }
+            let at_b = i < bytes.len() && bytes[i] == b'b';
+            let ends = i + 1 >= bytes.len() || !bytes[i + 1].is_ascii_alphanumeric();
+            if at_b && ends {
+                if let Ok(n) = id[start..i].parse::<u64>() {
+                    best = Some(best.map_or(n, |b: u64| b.max(n)));
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
+    best
+}
+
+/// `auto-strong`: keep only models with a known strength, strongest first (the order
+/// within a tier is kept). Returns how many share the top tier, the part round-robin
+/// may rotate.
+pub fn strongest_first(candidates: &mut Vec<Resolved>) -> usize {
+    candidates.retain(|c| strength(&c.model) > 0);
+    candidates.sort_by_key(|c| std::cmp::Reverse(strength(&c.model)));
+    let top = candidates.first().map(|c| strength(&c.model));
+    candidates.iter().take_while(|c| Some(strength(&c.model)) == top).count()
 }
 
 /// Ordered candidates for `auto`.
@@ -306,6 +415,69 @@ mod tests {
         custom.insert(OPENAI_COMPATIBLE.into(), json!(["qwen"]));
         assert!(needs_live_models(&r, &conns, &custom).is_empty());
         assert_eq!(auto_candidates(&r, &aliases, &conns, &[], &custom, &HashMap::new())[0].model, "qwen");
+    }
+
+    #[test]
+    fn strength_keeps_agent_capable_families_and_drops_small_models() {
+        for (id, want) in [
+            ("claude-opus-4-6", 3),
+            ("anthropic/claude-sonnet-4.6", 3),
+            ("claude-3-5-sonnet-20241022", 2),
+            ("claude-haiku-4-5", 1),
+            ("gpt-5.4", 3),
+            ("gpt-5-mini", 1),
+            ("gpt-5-nano", 0),
+            ("gpt-4.1", 2),
+            ("gpt-4o-mini", 0),
+            ("o3", 3),
+            ("o3-mini", 0),
+            ("o4-mini", 1),
+            ("gemini-3.1-pro-preview", 3),
+            ("google/gemini-2.5-flash", 2),
+            ("gemini-3.1-flash-lite-preview", 0),
+            ("gemini-2.0-flash", 0),
+            ("deepseek-chat", 2),
+            ("deepseek/deepseek-v4-pro", 3),
+            ("@cf/deepseek-ai/deepseek-r1-distill-qwen-32b", 0),
+            ("qwen3-coder-480b-a35b-instruct-turbo", 2),
+            ("qwen/qwen3.7-max", 3),
+            ("qwen-3-32b", 0),
+            ("Qwen/Qwen2.5-72B-Instruct", 0),
+            ("moonshotai/kimi-k2.6", 3),
+            ("glm-4.6", 2),
+            ("glm-4.5-air", 0),
+            ("MiniMax-M2.5", 2),
+            ("grok-4", 3),
+            ("gpt-oss-120b", 1),
+            ("gpt-oss-20b", 0),
+            ("llama-3.3-70b-versatile", 0),
+            ("meta-llama/llama-4-maverick-17b-128e-instruct", 0),
+            ("nvidia/nemotron-3-super-120b-a12b:free", 1),
+            ("kilo-auto/free", 0),
+            ("big-pickle", 0),
+        ] {
+            assert_eq!(strength(id), want, "{id}");
+        }
+        assert_eq!(params_b("qwen3-235b-a22b"), Some(235));
+        assert_eq!(params_b("claude-opus-4-20250514"), None);
+    }
+
+    #[test]
+    fn auto_strong_keeps_strong_models_strongest_first() {
+        assert!(is_auto_strong("auto-strong") && is_auto_strong("zilong-router/auto-strong"));
+        assert!(is_auto("auto-strong") && !is_auto_strong("auto"));
+        let r = |p: &str, m: &str| Resolved { provider: p.into(), model: m.into(), pinned_connection: None };
+        let mut c = vec![
+            r("groq", "llama-3.3-70b-versatile"),
+            r("deepseek", "deepseek-chat"),
+            r("anthropic", "claude-sonnet-4-6"),
+            r("openai", "gpt-4o"),
+            r("gemini", "gemini-2.5-pro"),
+        ];
+        let top = strongest_first(&mut c);
+        let order: Vec<&str> = c.iter().map(|x| x.model.as_str()).collect();
+        assert_eq!(order, ["claude-sonnet-4-6", "gemini-2.5-pro", "deepseek-chat", "gpt-4o"]);
+        assert_eq!(top, 2);
     }
 
     #[test]

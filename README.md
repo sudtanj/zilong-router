@@ -14,6 +14,11 @@ Orange Pi Zero 3:
 - One endpoint for your coding tools: OpenAI Chat Completions (`/v1/chat/completions`)
   and Anthropic Messages (`/v1/messages`), with translation between the two in both
   directions, streaming and non-streaming, including tool calls and thinking.
+- OpenAI Responses (`/v1/responses`) for Codex and other Responses-only clients: translated
+  to a chat request and routed the same way, then answered as a Responses document or event
+  stream (text, reasoning summaries, function calls, and Codex's freeform `apply_patch` tool).
+  Stateless: send the full input each time (`previous_response_id` is rejected), and
+  server-side tools such as `web_search` are dropped.
 - Multiple accounts per provider with fill-first or round-robin selection, per-model
   cooldown locks and exponential backoff on rate limits, automatic fallback to the next
   account, and retries on 502/503/504 (the same rules as upstream). The `auto` model

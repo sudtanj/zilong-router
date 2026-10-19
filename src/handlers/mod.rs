@@ -2,6 +2,7 @@
 
 pub mod chat;
 pub mod models;
+pub mod responses;
 
 use std::sync::Arc;
 
@@ -32,10 +33,12 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/v1/models/:id", get(models::get_openai))
         .route("/v1/chat/completions", post(chat::chat_completions))
         .route("/v1/messages", post(chat::messages))
+        .route("/v1/responses", post(responses::responses))
         .route("/v1/messages/count_tokens", post(chat::count_tokens))
         // Tools that hard-code a doubled prefix (`/v1/v1/...`) still work, like upstream.
         .route("/v1/v1/chat/completions", post(chat::chat_completions))
         .route("/v1/v1/messages", post(chat::messages))
+        .route("/v1/v1/responses", post(responses::responses))
         .merge(crate::dashboard::routes(state.clone()))
         .layer(DefaultBodyLimit::max(state.cfg.max_body_bytes))
         .layer(cors)

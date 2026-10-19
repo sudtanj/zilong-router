@@ -6,6 +6,7 @@
 
 pub mod request;
 pub mod response;
+pub mod responses;
 pub mod stream;
 
 use serde_json::Value;
@@ -103,7 +104,7 @@ pub(crate) fn text_of(content: &Value) -> String {
                     return Some(s.to_string());
                 }
                 let ty = p.get("type").and_then(Value::as_str).unwrap_or("text");
-                if ty == "text" || ty == "input_text" {
+                if ty == "text" || ty == "input_text" || ty == "output_text" {
                     p.get("text").and_then(Value::as_str).map(str::to_string)
                 } else {
                     None

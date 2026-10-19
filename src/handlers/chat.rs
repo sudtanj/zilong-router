@@ -82,7 +82,7 @@ fn auth(
     })
 }
 
-async fn handle(
+pub(super) async fn handle(
     state: Arc<AppState>,
     peer: SocketAddr,
     headers: HeaderMap,

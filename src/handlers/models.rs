@@ -44,6 +44,13 @@ fn model_entries(state: &AppState, caller: &Caller, opencode_free: &[String]) ->
         "owned_by": "zilong-router",
         "name": "Auto, strong models only (agents and tool use)",
     }));
+    out.push(json!({
+        "id": "auto-coding",
+        "object": "model",
+        "created": created,
+        "owned_by": "zilong-router",
+        "name": "Auto for coding (same models as auto-strong)",
+    }));
     for p in state.registry.all() {
         if !active.contains(p.id.as_str()) && !p.no_auth {
             continue;

@@ -103,7 +103,8 @@ Seed Pro/Code, Nemotron Ultra/Super, gpt-oss-120b and Command A. Small variants
 are left out. Candidates are tried strongest first (frontier models, then strong, then
 capable); Round Robin rotates only among the strongest tier. To pick the models
 yourself, set `settings.autoStrongModels` (or *Configure* on the Auto model card); a
-request's `models` array also overrides it.
+request's `models` array also overrides it. `auto-coding` is another name for
+`auto-strong`, for coding agents.
 
 Requests from the Pi itself need no key. Requests from the LAN need one, and you can
 force keys everywhere with `zilong-router settings requireApiKey=true`.

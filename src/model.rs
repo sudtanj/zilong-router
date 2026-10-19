@@ -90,10 +90,14 @@ pub fn is_auto(raw: &str) -> bool {
         || matches!(strip_context_marker(raw).to_ascii_lowercase().as_str(), "auto" | "zilong-router/auto")
 }
 
-/// `auto-strong` (also `zilong-router/auto-strong`): like `auto`, but only models that
-/// cope with agent work (long system prompts, many tools, multi-step tool use).
+/// `auto-strong` (also `zilong-router/auto-strong`, and `auto-coding` for coding
+/// agents): like `auto`, but only models that cope with agent work (long system
+/// prompts, many tools, multi-step tool use).
 pub fn is_auto_strong(raw: &str) -> bool {
-    matches!(strip_context_marker(raw).to_ascii_lowercase().as_str(), "auto-strong" | "zilong-router/auto-strong")
+    matches!(
+        strip_context_marker(raw).to_ascii_lowercase().as_str(),
+        "auto-strong" | "zilong-router/auto-strong" | "auto-coding" | "zilong-router/auto-coding"
+    )
 }
 
 /// How well a model handles agent work, from its id: 3 frontier, 2 strong, 1 capable,
@@ -466,6 +470,7 @@ mod tests {
     fn auto_strong_keeps_strong_models_strongest_first() {
         assert!(is_auto_strong("auto-strong") && is_auto_strong("zilong-router/auto-strong"));
         assert!(is_auto("auto-strong") && !is_auto_strong("auto"));
+        assert!(is_auto_strong("auto-coding") && is_auto("zilong-router/auto-coding"));
         let r = |p: &str, m: &str| Resolved { provider: p.into(), model: m.into(), pinned_connection: None };
         let mut c = vec![
             r("groq", "llama-3.3-70b-versatile"),

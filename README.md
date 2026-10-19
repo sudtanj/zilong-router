@@ -106,6 +106,14 @@ yourself, set `settings.autoStrongModels` (or *Configure* on the Auto model card
 request's `models` array also overrides it. `auto-coding` is another name for
 `auto-strong`, for coding agents.
 
+Model `auto-images` is the same for requests with images (screenshots, photos,
+documents): only model families that take image input, best first. Claude Opus/Sonnet,
+GPT-5, GPT-4.1, o3, Gemini Pro and Qwen VL Max/235B come first, then Claude Haiku,
+GPT-4o, Gemini Flash, other Qwen VL, Llama 4, Grok 4, GLM V and Kimi K2.5+, then small
+or older vision models (Gemma 3, Pixtral, Llama 3.2 Vision, …). Small variants drop a
+tier. Text-only models and image generators are left out. Your own list goes in
+`settings.autoImageModels` (or *Configure*), or the request's `models` array.
+
 Requests from the Pi itself need no key. Requests from the LAN need one, and you can
 force keys everywhere with `zilong-router settings requireApiKey=true`.
 

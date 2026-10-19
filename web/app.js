@@ -316,6 +316,7 @@ const autoCard = (a, origin) => {
         : '<span class="badge sm error"><span class="dot"></span>cooling down</span>'}</div>`).join('');
   const rows = candRows(a.candidates);
   const strong = a.strongCandidates || [];
+  const images = a.imageCandidates || [];
   return `<div class="card" id="auto-model">
     <div class="row between mb4">
       <h2 class="ct">${ms('auto_awesome')}Auto model</h2>
@@ -344,6 +345,10 @@ const autoCard = (a, origin) => {
     <p class="xs muted mb2">For agents with many tools (kongming, Claude Code, coding agents): only model families known to call tools reliably (Claude, GPT-5 and o3, Gemini Pro and Flash, DeepSeek V3.1+, Qwen Max/Plus/Coder, Kimi, GLM 4.5+, MiniMax M2+, Grok 4…), strongest first. Small models (nano, lite, mini, under 100B) are left out. ${a.strongSource === 'autoStrongModels' ? 'Using your list.' : ''}</p>
     ${strong.length ? `<div class="col">${candRows(strong)}</div>${strong.length > 12 ? `<p class="xs muted mt1">…and ${strong.length - 12} more</p>` : ''}`
       : `<div class="warn-box">${ms('warning', 16)}<p class="grow">No strong model among your accounts. Add a provider with a strong model, or list models for auto-strong under Configure.</p><a class="linkbtn" href="#/providers">Providers</a></div>`}
+    <p class="sm medium mt4 mb2">Image input: <code>auto-images</code> <button class="tiny" data-act="copy" data-text="auto-images" title="Copy">${ms('content_copy', 14)}</button></p>
+    <p class="xs muted mb2">For requests with screenshots or photos: only model families that read images (Claude, GPT-5/4.1/4o and o3, Gemini, Qwen VL, Llama 4, Grok 4, GLM V, Kimi K2.5+…), best first. Text-only models and image generators are left out. ${a.imageSource === 'autoImageModels' ? 'Using your list.' : ''}</p>
+    ${images.length ? `<div class="col">${candRows(images)}</div>${images.length > 12 ? `<p class="xs muted mt1">…and ${images.length - 12} more</p>` : ''}`
+      : `<div class="warn-box">${ms('warning', 16)}<p class="grow">No image-capable model among your accounts. Add a provider with a vision model, or list models for auto-images under Configure.</p><a class="linkbtn" href="#/providers">Providers</a></div>`}
   </div>`;
 };
 actions.editAuto = async () => {
@@ -354,11 +359,12 @@ actions.editAuto = async () => {
         placeholder: 'groq/llama-3.3-70b-versatile\nds/deepseek-chat', hint: 'Leave empty to use every model of every provider with an active account (compatible endpoints are asked for their model list).'})
       + field('strongModels', 'Models for auto-strong, in order (one per line)', {type: 'textarea', rows: 4, value: (a.autoStrongModels || []).join('\n'),
         placeholder: 'anthropic/claude-sonnet-4-6\nds/deepseek-chat', hint: 'Leave empty to use every strong model of every provider with an active account, strongest first.'})
+      + field('imageModels', 'Models for auto-images, in order (one per line)', {type: 'textarea', rows: 4, value: (a.autoImageModels || []).join('\n'),
+        placeholder: 'gemini/gemini-2.5-flash\nopenai/gpt-4o', hint: 'Leave empty to use every image-capable model of every provider with an active account, best first.'})
       + twoButtons('Save'),
     onSubmit: async (f) => {
-      const models = f.models.value.split('\n').map((s) => s.trim()).filter(Boolean);
-      const strongModels = f.strongModels.value.split('\n').map((s) => s.trim()).filter(Boolean);
-      await patch('/settings', {autoModels: models, autoStrongModels: strongModels});
+      const lines = (el) => el.value.split('\n').map((s) => s.trim()).filter(Boolean);
+      await patch('/settings', {autoModels: lines(f.models), autoStrongModels: lines(f.strongModels), autoImageModels: lines(f.imageModels)});
       notify('success', 'Auto model saved');
       reload();
     },

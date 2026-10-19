@@ -537,25 +537,37 @@ pub async fn delete_alias(State(state): S, Path(alias): Path<String>) -> R {
 
 // ----- auto model ----------------------------------------------------------------
 
-/// What `model: "auto"` and `model: "auto-strong"` would try right now, in order, and
-/// whether each candidate has an account that is not cooling down.
+/// What `model: "auto"`, `"auto-strong"` and `"auto-images"` would try right now, in
+/// order, and whether each candidate has an account that is not cooling down.
 pub async fn auto_preview(State(state): S) -> R {
-    let explicit = crate::discovery::saved_auto_models(&state, false);
-    let strong_explicit = crate::discovery::saved_auto_models(&state, true);
+    use crate::model::AutoKind;
+    let explicit = crate::discovery::saved_auto_models(&state, AutoKind::Any);
+    let strong_explicit = crate::discovery::saved_auto_models(&state, AutoKind::Strong);
+    let image_explicit = crate::discovery::saved_auto_models(&state, AutoKind::Images);
     let aliases = state.db.kv_scope("modelAliases")?;
     let conns = state.db.all_connections()?;
     let now = OffsetDateTime::now_utc();
     let auto = crate::discovery::auto_candidates(&state, &aliases, &conns, &explicit).await;
-    let strong = if !strong_explicit.is_empty() {
-        crate::discovery::auto_candidates(&state, &aliases, &conns, &strong_explicit).await
+    // Every model of every account, which the scored kinds filter when they have no list.
+    let every = if explicit.is_empty() {
+        auto.clone()
     } else {
-        let mut all = if explicit.is_empty() {
-            auto.clone()
-        } else {
-            crate::discovery::auto_candidates(&state, &aliases, &conns, &[]).await
-        };
-        crate::model::strongest_first(&mut all);
+        crate::discovery::auto_candidates(&state, &aliases, &conns, &[]).await
+    };
+    let ranked = |kind: AutoKind| {
+        let mut all = every.clone();
+        crate::model::best_first(&mut all, kind.score().expect("scored kind"));
         all
+    };
+    let strong = if strong_explicit.is_empty() {
+        ranked(AutoKind::Strong)
+    } else {
+        crate::discovery::auto_candidates(&state, &aliases, &conns, &strong_explicit).await
+    };
+    let images = if image_explicit.is_empty() {
+        ranked(AutoKind::Images)
+    } else {
+        crate::discovery::auto_candidates(&state, &aliases, &conns, &image_explicit).await
     };
     let describe = |c: crate::model::Resolved| {
         let p = state.registry.get(&c.provider);
@@ -586,10 +598,12 @@ pub async fn auto_preview(State(state): S) -> R {
             "supported": supported,
             "ready": supported && (no_auth || free),
             "strength": crate::model::strength(&c.model),
+            "vision": crate::model::vision(&c.model),
         })
     };
     let candidates: Vec<Value> = auto.into_iter().take(60).map(&describe).collect();
     let strong_candidates: Vec<Value> = strong.into_iter().take(60).map(&describe).collect();
+    let image_candidates: Vec<Value> = images.into_iter().take(60).map(&describe).collect();
     Ok(Json(json!({
         "source": if explicit.is_empty() { "accounts" } else { "autoModels" },
         "autoModels": explicit,
@@ -597,6 +611,9 @@ pub async fn auto_preview(State(state): S) -> R {
         "strongSource": if strong_explicit.is_empty() { "accounts" } else { "autoStrongModels" },
         "autoStrongModels": strong_explicit,
         "strongCandidates": strong_candidates,
+        "imageSource": if image_explicit.is_empty() { "accounts" } else { "autoImageModels" },
+        "autoImageModels": image_explicit,
+        "imageCandidates": image_candidates,
     })))
 }
 

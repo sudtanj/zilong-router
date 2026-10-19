@@ -83,21 +83,133 @@ pub fn resolve(
     Resolved { provider: infer_provider(s).to_string(), model: s.to_string(), pinned_connection: None }
 }
 
-/// `auto` (also `zilong-router/auto`, and the `auto-strong` variants):
-/// let the router pick any available model.
-pub fn is_auto(raw: &str) -> bool {
-    is_auto_strong(raw)
-        || matches!(strip_context_marker(raw).to_ascii_lowercase().as_str(), "auto" | "zilong-router/auto")
+/// The `auto` models; each also answers to a `zilong-router/` prefix.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AutoKind {
+    /// `auto`: let the router pick any available model.
+    Any,
+    /// `auto-strong` (also `auto-coding`, for coding agents): only models that cope
+    /// with agent work (long system prompts, many tools, multi-step tool use).
+    Strong,
+    /// `auto-images`: only models that read images well.
+    Images,
 }
 
-/// `auto-strong` (also `zilong-router/auto-strong`, and `auto-coding` for coding
-/// agents): like `auto`, but only models that cope with agent work (long system
-/// prompts, many tools, multi-step tool use).
-pub fn is_auto_strong(raw: &str) -> bool {
-    matches!(
-        strip_context_marker(raw).to_ascii_lowercase().as_str(),
-        "auto-strong" | "zilong-router/auto-strong" | "auto-coding" | "zilong-router/auto-coding"
-    )
+impl AutoKind {
+    pub fn id(self) -> &'static str {
+        match self {
+            AutoKind::Any => "auto",
+            AutoKind::Strong => "auto-strong",
+            AutoKind::Images => "auto-images",
+        }
+    }
+
+    /// Settings key of the user's own ordered list.
+    pub fn settings_key(self) -> &'static str {
+        match self {
+            AutoKind::Any => "autoModels",
+            AutoKind::Strong => "autoStrongModels",
+            AutoKind::Images => "autoImageModels",
+        }
+    }
+
+    /// Round-robin cursor key in `AppState::rr` (provider ids never contain a space).
+    pub fn rr_key(self) -> &'static str {
+        match self {
+            AutoKind::Any => "auto model",
+            AutoKind::Strong => "auto-strong model",
+            AutoKind::Images => "auto-images model",
+        }
+    }
+
+    /// How candidates are filtered and ordered when there is no saved list; `None`
+    /// keeps every model in account order.
+    pub fn score(self) -> Option<fn(&str) -> u8> {
+        match self {
+            AutoKind::Any => None,
+            AutoKind::Strong => Some(strength),
+            AutoKind::Images => Some(vision),
+        }
+    }
+}
+
+pub fn auto_kind(raw: &str) -> Option<AutoKind> {
+    let id = strip_context_marker(raw).to_ascii_lowercase();
+    match id.strip_prefix("zilong-router/").unwrap_or(&id) {
+        "auto" => Some(AutoKind::Any),
+        "auto-strong" | "auto-coding" => Some(AutoKind::Strong),
+        "auto-images" => Some(AutoKind::Images),
+        _ => None,
+    }
+}
+
+pub fn is_auto(raw: &str) -> bool {
+    auto_kind(raw).is_some()
+}
+
+/// How well a model reads images, from its id: 3 best, 2 good, 1 small or older, 0
+/// text-only or unknown. Like `strength`, a list of families known to take image
+/// input; image generators, speech and embedding models are left out.
+pub fn vision(model: &str) -> u8 {
+    let last = model.rsplit('/').next().unwrap_or(model);
+    let id = last.split(':').next().unwrap_or(last).to_ascii_lowercase();
+    let id = id.as_str();
+    let has = |w: &str| id.contains(w);
+    let any = |ws: &[&str]| ws.iter().any(|&w| has(w));
+    if any(&[
+        "dall-e",
+        "gpt-image",
+        "imagen",
+        "flux",
+        "stable-diffusion",
+        "sdxl",
+        "-image",
+        "embed",
+        "tts",
+        "whisper",
+        "audio",
+        "transcribe",
+        "realtime",
+    ]) {
+        return 0;
+    }
+    // An explicit vision variant: `-vl`, `vision`, GLM's `4.5v`, …
+    let vl = any(&["-vl", "vision", "pixtral", "llava", "internvl", "minicpm-v", "moondream", "multimodal"])
+        || id.split('-').any(|t| t.len() > 1 && t.ends_with('v') && t.as_bytes()[0].is_ascii_digit());
+    let claude = has("claude");
+    let gemini = has("gemini");
+    let gpt5 = id.starts_with("gpt-5") || id.starts_with("gpt-6");
+    // First match wins.
+    let rules: &[(bool, u8)] = &[
+        (claude && (has("opus") || has("sonnet")), 3),
+        (claude, 2),
+        (gpt5, 3),
+        (id.starts_with("gpt-4.1"), 3),
+        (id.starts_with("gpt-4o") || id.starts_with("chatgpt-4o") || id.starts_with("gpt-4-turbo"), 2),
+        (id.starts_with("o3") && !has("mini"), 3),
+        (id.starts_with("o4"), 2),
+        (gemini && has("pro"), 3),
+        (gemini, 2),
+        (has("qwen") && vl && any(&["max", "plus", "235b"]), 3),
+        (has("qwen") && vl, 2),
+        (has("grok-4") || has("grok-5"), 2),
+        (has("llama-4"), 2),
+        (has("glm") && vl, 2),
+        (has("kimi") && (vl || any(&["k2.5", "k2-5", "k2.6", "k3"])), 2),
+        (any(&["mistral-medium", "mistral-large-3", "pixtral-large"]), 2),
+        (has("mimo") && vl, 2),
+        (any(&["mistral-small", "gemma-3", "gemma-4"]), 1),
+        (vl, 1),
+    ];
+    let tier = rules.iter().find(|(hit, _)| *hit).map_or(0, |(_, tier)| *tier);
+    // Small variants drop a tier but stay usable. Llama 4's "17b" counts active params.
+    let small =
+        any(&["nano", "lite", "tiny", "-mini", "-small"]) || (!has("llama-4") && params_b(id).is_some_and(|b| b < 30));
+    if small && tier > 1 {
+        tier - 1
+    } else {
+        tier
+    }
 }
 
 /// How well a model handles agent work, from its id: 3 frontier, 2 strong, 1 capable,
@@ -192,14 +304,14 @@ fn params_b(id: &str) -> Option<u64> {
     best
 }
 
-/// `auto-strong`: keep only models with a known strength, strongest first (the order
-/// within a tier is kept). Returns how many share the top tier, the part round-robin
-/// may rotate.
-pub fn strongest_first(candidates: &mut Vec<Resolved>) -> usize {
-    candidates.retain(|c| strength(&c.model) > 0);
-    candidates.sort_by_key(|c| std::cmp::Reverse(strength(&c.model)));
-    let top = candidates.first().map(|c| strength(&c.model));
-    candidates.iter().take_while(|c| Some(strength(&c.model)) == top).count()
+/// `auto-strong` and `auto-images` without a saved list: keep only models scoring
+/// above 0, best first (the order within a tier is kept). Returns how many share the
+/// top tier, the part round-robin may rotate.
+pub fn best_first(candidates: &mut Vec<Resolved>, score: fn(&str) -> u8) -> usize {
+    candidates.retain(|c| score(&c.model) > 0);
+    candidates.sort_by_key(|c| std::cmp::Reverse(score(&c.model)));
+    let top = candidates.first().map(|c| score(&c.model));
+    candidates.iter().take_while(|c| Some(score(&c.model)) == top).count()
 }
 
 /// Ordered candidates for `auto`.
@@ -468,21 +580,75 @@ mod tests {
 
     #[test]
     fn auto_strong_keeps_strong_models_strongest_first() {
-        assert!(is_auto_strong("auto-strong") && is_auto_strong("zilong-router/auto-strong"));
-        assert!(is_auto("auto-strong") && !is_auto_strong("auto"));
-        assert!(is_auto_strong("auto-coding") && is_auto("zilong-router/auto-coding"));
+        for (raw, kind) in [
+            ("auto", AutoKind::Any),
+            ("zilong-router/auto", AutoKind::Any),
+            ("auto-strong", AutoKind::Strong),
+            ("zilong-router/auto-strong", AutoKind::Strong),
+            ("auto-coding", AutoKind::Strong),
+            ("zilong-router/auto-coding[1m]", AutoKind::Strong),
+            ("Auto-Images", AutoKind::Images),
+            ("zilong-router/auto-images", AutoKind::Images),
+        ] {
+            assert_eq!(auto_kind(raw), Some(kind), "{raw}");
+        }
+        assert!(!is_auto("openrouter/auto") && !is_auto("auto-image"));
         let r = |p: &str, m: &str| Resolved { provider: p.into(), model: m.into(), pinned_connection: None };
-        let mut c = vec![
+        let list = vec![
             r("groq", "llama-3.3-70b-versatile"),
             r("deepseek", "deepseek-chat"),
             r("anthropic", "claude-sonnet-4-6"),
             r("openai", "gpt-4o"),
             r("gemini", "gemini-2.5-pro"),
         ];
-        let top = strongest_first(&mut c);
+        let mut c = list.clone();
+        let top = best_first(&mut c, strength);
         let order: Vec<&str> = c.iter().map(|x| x.model.as_str()).collect();
         assert_eq!(order, ["claude-sonnet-4-6", "gemini-2.5-pro", "deepseek-chat", "gpt-4o"]);
         assert_eq!(top, 2);
+
+        // auto-images: DeepSeek and Llama 3.3 read no images.
+        let mut c = list;
+        let top = best_first(&mut c, vision);
+        let order: Vec<&str> = c.iter().map(|x| x.model.as_str()).collect();
+        assert_eq!(order, ["claude-sonnet-4-6", "gemini-2.5-pro", "gpt-4o"]);
+        assert_eq!(top, 2);
+    }
+
+    #[test]
+    fn vision_keeps_image_capable_families() {
+        for (id, want) in [
+            ("claude-opus-4-6", 3),
+            ("claude-haiku-4-5", 2),
+            ("gpt-5.4", 3),
+            ("gpt-5-mini", 2),
+            ("gpt-4o-mini", 1),
+            ("o3", 3),
+            ("o3-mini", 0),
+            ("gemini-3.1-pro-preview", 3),
+            ("google/gemini-2.5-flash", 2),
+            ("gemini-3.1-flash-lite-preview", 1),
+            ("gemini-2.5-flash-image", 0),
+            ("gpt-image-1", 0),
+            ("qwen/qwen3-vl-235b-a22b-instruct", 3),
+            ("Qwen/Qwen2.5-VL-72B-Instruct", 2),
+            ("qwen2.5-vl-7b-instruct", 1),
+            ("Qwen/Qwen2.5-72B-Instruct", 0),
+            ("meta-llama/llama-4-maverick-17b-128e-instruct", 2),
+            ("llama-3.2-90b-vision-instruct", 1),
+            ("llama-3.3-70b-versatile", 0),
+            ("glm-4.5v", 2),
+            ("glm-4.6", 0),
+            ("moonshotai/kimi-k2.6", 2),
+            ("kimi-k2", 0),
+            ("grok-4", 2),
+            ("deepseek-chat", 0),
+            ("gemma-3-27b-it", 1),
+            ("text-embedding-3-small", 0),
+            ("big-pickle", 0),
+        ] {
+            assert_eq!(vision(id), want, "{id}");
+        }
     }
 
     #[test]

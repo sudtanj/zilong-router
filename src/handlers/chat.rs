@@ -148,8 +148,8 @@ async fn handle_inner(
 
     // `auto`: walk every candidate until one answers. Upstream errors only surface
     // before the first byte is sent, so moving on to the next model is always safe.
-    let strong = crate::model::is_auto_strong(&raw_model);
-    let explicit = if requested.is_empty() { crate::discovery::saved_auto_models(&state, strong) } else { requested };
+    let kind = crate::model::auto_kind(&raw_model).unwrap_or(crate::model::AutoKind::Any);
+    let explicit = if requested.is_empty() { crate::discovery::saved_auto_models(&state, kind) } else { requested };
     let mut candidates = crate::discovery::auto_candidates(&state, &aliases, &connections, &explicit).await;
     // Drop unusable models before rotating so round-robin only cycles real options.
     candidates.retain(|c| {
@@ -158,12 +158,13 @@ async fn handle_inner(
                 && p.transport_for(source, &c.model).map(|t| t.format.supported()).unwrap_or(false)
         })
     });
-    if strong && explicit.is_empty() {
-        // Strongest tier first; round-robin spreads load across that tier only.
-        let top = crate::model::strongest_first(&mut candidates);
-        crate::router::rotate_auto(&state, &mut candidates[..top], crate::router::AUTO_STRONG_RR_KEY);
-    } else {
-        crate::router::rotate_auto(&state, &mut candidates, crate::router::AUTO_RR_KEY);
+    match kind.score() {
+        Some(score) if explicit.is_empty() => {
+            // Best tier first; round-robin spreads load across that tier only.
+            let top = crate::model::best_first(&mut candidates, score);
+            crate::router::rotate_auto(&state, &mut candidates[..top], kind.rr_key());
+        }
+        _ => crate::router::rotate_auto(&state, &mut candidates, kind.rr_key()),
     }
 
     let mut last: Option<ApiError> = None;
@@ -202,7 +203,14 @@ async fn handle_inner(
                 format!("auto: all {} models failed. {more}{}", failures.len(), failures[skipped..].join(" | "));
             ApiError { message, ..e }
         }
-        None if strong => ApiError::new(
+        None if kind == crate::model::AutoKind::Images => ApiError::new(
+            404,
+            source,
+            "auto-images: no image-capable model is available. Add an account for a provider with vision \
+             models (Claude, GPT-5/4o, Gemini, Qwen VL, Llama 4, Grok 4…), \
+             or list models in settings.autoImageModels",
+        ),
+        None if kind == crate::model::AutoKind::Strong => ApiError::new(
             404,
             source,
             "auto-strong: no strong model is available. Add an account for a provider with strong models \

@@ -183,11 +183,6 @@ fn advance(entry: &mut RoundRobin, ids: &[&str], sticky: i64) -> usize {
     idx
 }
 
-/// Cursor keys for `auto` and `auto-strong` in `AppState::rr` (provider ids never
-/// contain a space).
-pub const AUTO_RR_KEY: &str = "auto model";
-pub const AUTO_STRONG_RR_KEY: &str = "auto-strong model";
-
 /// `auto` follows the global Round Robin setting: each request starts at the next
 /// candidate (sticky for `stickyRoundRobinLimit` requests, like accounts) and the
 /// rest, in order, stay as fallbacks. Fill-first, the default, keeps the order.

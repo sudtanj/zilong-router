@@ -57,15 +57,13 @@ pub async fn auto_candidates(
     out
 }
 
-/// The saved candidate list: `settings.autoModels` for `auto`, `settings.autoStrongModels`
-/// for `auto-strong`. Empty means "every model of every account" (filtered by strength
-/// for `auto-strong`).
-pub fn saved_auto_models(state: &AppState, strong: bool) -> Vec<String> {
-    let key = if strong { "autoStrongModels" } else { "autoModels" };
+/// The saved candidate list (`settings.autoModels`, `autoStrongModels`, …). Empty
+/// means "every model of every account" (filtered by the kind's score).
+pub fn saved_auto_models(state: &AppState, kind: crate::model::AutoKind) -> Vec<String> {
     state
         .db
         .settings()
-        .get(key)
+        .get(kind.settings_key())
         .and_then(Value::as_array)
         .into_iter()
         .flatten()

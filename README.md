@@ -34,7 +34,9 @@ Orange Pi Zero 3:
 - Provider definitions are **copied from upstream automatically**: a weekly GitHub
   Actions job clones 9router and converts its registry to `data/providers.json`. No
   hand-maintained provider list.
-- Idle memory is a few MB.
+- Small: a 6.4 MiB binary that is ready 13 ms after start and idles at about 8 MiB RSS; 100
+  concurrent streaming requests with 32 KiB prompts peak at about 36 MiB (1 worker thread,
+  measured on arm64 by the Benchmark workflow, `tests/memory_bench.rs`).
 
 Not (yet) included: Gemini wire format, model combos, the Responses API, embeddings,
 image/audio, and providers that need IDE-impersonation executors (Cursor, Windsurf, Kiro

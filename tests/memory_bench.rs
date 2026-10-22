@@ -41,9 +41,7 @@ async fn models() -> Json<Value> {
 }
 
 async fn chat(_body: Bytes) -> Response {
-    let chunk = |choices: Value| {
-        json!({"id": "chatcmpl-mock", "object": "chat.completion.chunk", "created": 0, "model": "exo-free", "choices": choices})
-    };
+    let chunk = |choices: Value| json!({"id": "chatcmpl-mock", "object": "chat.completion.chunk", "created": 0, "model": "exo-free", "choices": choices});
     let events = futures_util::stream::unfold(0usize, move |i| async move {
         let event = match i {
             0 => chunk(json!([{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": null}])),

@@ -1,0 +1,26 @@
+name: Benchmark
+
+# Memory and latency of the release binary on a native arm64 runner (the Orange Pi Zero 3 is
+# aarch64), with 1 worker thread (the Docker image) and 2 (the systemd unit's default). The
+# tables land in the job summary; see tests/memory_bench.rs for what is measured.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  memory:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: bench-arm64
+      - name: Benchmark
+        env:
+          BENCH_WORKERS: "1,2"
+        run: cargo test --release --locked --test memory_bench -- --ignored --nocapture

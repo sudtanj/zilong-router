@@ -271,8 +271,17 @@ fn ms(d: Duration) -> String {
     format!("{} ms", d.as_millis())
 }
 
-/// Benchmarks one router process and returns its markdown report and error count.
-async fn bench(mock: &str, workers: &str) -> (String, usize) {
+/// What the README's summary line quotes from one benchmarked process.
+struct Summary {
+    workers: String,
+    ready: Duration,
+    idle_kb: u64,
+    concurrency: usize,
+    peak_kb: u64,
+}
+
+/// Benchmarks one router process and returns its markdown report, error count and summary.
+async fn bench(mock: &str, workers: &str) -> (String, usize, Summary) {
     let prompt: Arc<str> = "You are a careful coding agent. ".repeat(PROMPT_BYTES / 32).into();
     let started = Instant::now();
     let router = start_router(mock, workers).await;
@@ -291,7 +300,7 @@ async fn bench(mock: &str, workers: &str) -> (String, usize) {
     let after = mem(pid);
 
     let mut md = String::new();
-    let _ = writeln!(md, "#### {workers} worker thread(s)\n");
+    let _ = writeln!(md, "### {workers} worker thread(s)\n");
     let _ = writeln!(md, "Ready {} after spawn.\n", ms(ready));
     let _ = writeln!(md, "| State | RSS | Threads |\n|---|---:|---:|");
     let _ = writeln!(md, "| Idle, 2 s after start | {} | {} |", mib(idle.rss_kb), idle.threads);
@@ -318,7 +327,23 @@ async fn bench(mock: &str, workers: &str) -> (String, usize) {
         let _ = writeln!(md, "\nFirst error: `{first}`");
     }
     md.push('\n');
-    (md, errors.len())
+    let last = runs.last().unwrap();
+    let summary = Summary {
+        workers: workers.to_string(),
+        ready,
+        idle_kb: idle.rss_kb,
+        concurrency: last.concurrency,
+        peak_kb: last.peak_kb,
+    };
+    (md, errors.len(), summary)
+}
+
+/// Replaces the text between `<!-- bench:{name} -->` and `<!-- /bench:{name} -->`.
+fn replace_marked(text: &str, name: &str, body: &str) -> String {
+    let (open, close) = (format!("<!-- bench:{name} -->"), format!("<!-- /bench:{name} -->"));
+    let start = text.find(&open).unwrap_or_else(|| panic!("{open} is missing from the README")) + open.len();
+    let end = start + text[start..].find(&close).unwrap_or_else(|| panic!("{close} is missing from the README"));
+    format!("{}{body}{}", &text[..start], &text[end..])
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -326,31 +351,53 @@ async fn bench(mock: &str, workers: &str) -> (String, usize) {
 async fn memory_and_latency() {
     let mock = start_mock().await;
     let workers = std::env::var("BENCH_WORKERS").unwrap_or_else(|_| "1,2".into());
-    let size = std::fs::metadata(BIN).map(|m| m.len()).unwrap_or(0);
+    let size_mib = std::fs::metadata(BIN).map(|m| m.len()).unwrap_or(0) as f64 / (1024.0 * 1024.0);
+    let sha = std::env::var("GITHUB_SHA").unwrap_or_default();
+    let commit = if sha.is_empty() { String::new() } else { format!(" at commit `{}`", &sha[..sha.len().min(7)]) };
 
     let mut md = String::new();
-    let _ = writeln!(md, "### zilong-router memory benchmark ({})\n", std::env::consts::ARCH);
     let _ = writeln!(
         md,
-        "Binary {:.1} MiB. The mock upstream streams {CHUNKS} chunks {} ms apart (about {} ms per \
-         request); every request carries a {} KiB system prompt; requests rotate between OpenAI \
-         JSON, OpenAI streaming and Anthropic Messages streaming, and each is logged to SQLite.\n",
-        size as f64 / (1024.0 * 1024.0),
+        "Measured {} on {}{commit}. Binary {size_mib:.1} MiB. The mock upstream streams {CHUNKS} chunks {} ms \
+         apart (about {} ms per request); every request carries a {} KiB system prompt; requests rotate \
+         between OpenAI JSON, OpenAI streaming and Anthropic Messages streaming, and each is logged to SQLite.\n",
+        time::OffsetDateTime::now_utc().date(),
+        std::env::consts::ARCH,
         CHUNK_DELAY.as_millis(),
         CHUNK_DELAY.as_millis() * CHUNKS as u128,
         PROMPT_BYTES / 1024,
     );
     let mut errors = 0;
+    let mut summaries = Vec::new();
     for w in workers.split(',').map(str::trim).filter(|w| !w.is_empty()) {
-        let (section, e) = bench(&mock, w).await;
+        let (section, e, summary) = bench(&mock, w).await;
         md.push_str(&section);
         errors += e;
+        summaries.push(summary);
     }
 
     println!("{md}");
     if let Ok(path) = std::env::var("GITHUB_STEP_SUMMARY") {
         let mut f = std::fs::OpenOptions::new().append(true).create(true).open(path).unwrap();
-        f.write_all(md.as_bytes()).unwrap();
+        writeln!(f, "## zilong-router memory benchmark\n\n{md}").unwrap();
     }
     assert_eq!(errors, 0, "some benchmark requests failed; see the report above");
+
+    // The workflow passes BENCH_README=README.md to refresh the numbers quoted there.
+    if let (Ok(path), Some(s)) = (std::env::var("BENCH_README"), summaries.first()) {
+        let line = format!(
+            "Small: a {size_mib:.1} MiB binary that is ready {} after start and idles at {} RSS; {} concurrent \
+             streaming requests with {} KiB prompts peak at {} ({} worker thread(s); see [Benchmark](#benchmark)).",
+            ms(s.ready),
+            mib(s.idle_kb),
+            s.concurrency,
+            PROMPT_BYTES / 1024,
+            mib(s.peak_kb),
+            s.workers,
+        );
+        let readme = std::fs::read_to_string(&path).unwrap();
+        let readme = replace_marked(&readme, "summary", &line);
+        let readme = replace_marked(&readme, "report", &format!("\n{}\n", md.trim()));
+        std::fs::write(&path, readme).unwrap();
+    }
 }

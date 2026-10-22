@@ -34,9 +34,7 @@ Orange Pi Zero 3:
 - Provider definitions are **copied from upstream automatically**: a weekly GitHub
   Actions job clones 9router and converts its registry to `data/providers.json`. No
   hand-maintained provider list.
-- Small: a 6.4 MiB binary that is ready 13 ms after start and idles at about 8 MiB RSS; 100
-  concurrent streaming requests with 32 KiB prompts peak at about 36 MiB (1 worker thread,
-  measured on arm64 by the Benchmark workflow, `tests/memory_bench.rs`).
+- <!-- bench:summary -->Small: a 6.4 MiB binary that is ready 13 ms after start and idles at 7.9 MiB RSS; 100 concurrent streaming requests with 32 KiB prompts peak at 36.2 MiB (1 worker thread(s); see [Benchmark](#benchmark)).<!-- /bench:summary -->
 
 Not (yet) included: Gemini wire format, model combos, the Responses API, embeddings,
 image/audio, and providers that need IDE-impersonation executors (Cursor, Windsurf, Kiro
@@ -289,6 +287,57 @@ cargo install cross && cross build --release --target aarch64-unknown-linux-musl
 
 CI (`.github/workflows/ci.yml`) runs fmt, clippy and tests, then builds static musl
 binaries for aarch64 and x86_64 and attaches them to tagged releases.
+
+## Benchmark
+
+The Benchmark workflow (`.github/workflows/bench.yml`) runs `tests/memory_bench.rs` on a
+native arm64 GitHub runner after every code change on `main` and rewrites this section
+and the summary line at the top. The router is the release binary; the upstream is a local
+mock, so latency is the mock's ~200 ms plus the router's overhead, and requests per second
+are bounded by concurrency, not by the router. Expect the Orange Pi's slower cores to add
+latency under load; memory carries over.
+
+<!-- bench:report -->
+Measured 2026-10-22 on aarch64 at commit `ee3656f`. Binary 6.4 MiB. The mock upstream streams 8 chunks 25 ms apart (about 200 ms per request); every request carries a 32 KiB system prompt; requests rotate between OpenAI JSON, OpenAI streaming and Anthropic Messages streaming, and each is logged to SQLite.
+
+### 1 worker thread(s)
+
+Ready 13 ms after spawn.
+
+| State | RSS | Threads |
+|---|---:|---:|
+| Idle, 2 s after start | 7.9 MiB | 2 |
+| Idle after 30 sequential requests | 8.6 MiB | 2 |
+| Idle, 5 s after the load runs | 35.5 MiB | 2 |
+| Peak for the whole run (VmHWM) | 36.0 MiB | |
+
+| Concurrency | Requests | Errors | Req/s | p50 | p99 | Peak RSS |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 30 | 0 | 5 | 209 ms | 211 ms | 8.6 MiB |
+| 10 | 1000 | 0 | 48 | 209 ms | 215 ms | 12.3 MiB |
+| 50 | 1000 | 0 | 233 | 209 ms | 243 ms | 26.8 MiB |
+| 100 | 1000 | 0 | 449 | 210 ms | 269 ms | 36.2 MiB |
+
+### 2 worker thread(s)
+
+Ready 13 ms after spawn.
+
+| State | RSS | Threads |
+|---|---:|---:|
+| Idle, 2 s after start | 7.9 MiB | 3 |
+| Idle after 30 sequential requests | 9.0 MiB | 3 |
+| Idle, 5 s after the load runs | 41.6 MiB | 3 |
+| Peak for the whole run (VmHWM) | 41.9 MiB | |
+
+| Concurrency | Requests | Errors | Req/s | p50 | p99 | Peak RSS |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 30 | 0 | 5 | 209 ms | 211 ms | 9.0 MiB |
+| 10 | 1000 | 0 | 48 | 209 ms | 214 ms | 12.6 MiB |
+| 50 | 1000 | 0 | 235 | 210 ms | 227 ms | 25.9 MiB |
+| 100 | 1000 | 0 | 454 | 211 ms | 263 ms | 42.2 MiB |
+<!-- /bench:report -->
+
+Memory stays near the peak after a burst because the allocator keeps freed pages for reuse.
 
 ## Offsite database (Turso)
 

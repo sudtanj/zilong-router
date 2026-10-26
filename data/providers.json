@@ -1,8 +1,8 @@
 {
  "meta": {
-  "upstreamVersion": "0.5.104",
-  "upstreamCommit": "87a74e1bda3677193c6f71a7e2100c90311f0689",
-  "generatedAt": "2026-10-19"
+  "upstreamVersion": "0.5.111",
+  "upstreamCommit": "3a978a631ad65529c06e48ce495092d5bba29f46",
+  "generatedAt": "2026-10-26"
  },
  "providers": [
   {
@@ -1048,6 +1048,76 @@
    "thinkingConfig": null
   },
   {
+   "id": "chatgpt-web",
+   "alias": "chatgpt-web",
+   "aliases": [
+    "cg"
+   ],
+   "category": "webCookie",
+   "authType": "cookie",
+   "authModes": null,
+   "noAuth": false,
+   "priority": 220,
+   "display": {
+    "name": "ChatGPT Web",
+    "color": "#10A37F",
+    "textIcon": "CG",
+    "icon": "auto_awesome",
+    "website": "https://chatgpt.com",
+    "apiKeyUrl": null,
+    "deprecated": false,
+    "deprecationNotice": null
+   },
+   "transport": {
+    "baseUrl": "https://chatgpt.com",
+    "format": "openai",
+    "authType": "cookie"
+   },
+   "transports": null,
+   "oauth": null,
+   "models": [
+    {
+     "id": "gpt-5-6",
+     "name": "GPT-5.6 Sol — Instant"
+    },
+    {
+     "id": "gpt-5-6-thinking",
+     "name": "GPT-5.6 Sol — Thinking",
+     "supportsReasoning": true
+    },
+    {
+     "id": "gpt-5-6-pro",
+     "name": "GPT-5.6 Sol — Pro",
+     "supportsReasoning": true
+    },
+    {
+     "id": "gpt-5.6-luna-free",
+     "name": "GPT-5.6 Luna — Free"
+    },
+    {
+     "id": "gpt-5.6-luna-free-thinking",
+     "name": "GPT-5.6 Luna — Free Thinking",
+     "supportsReasoning": true
+    },
+    {
+     "id": "gpt-5-5-instant",
+     "name": "GPT-5.5 — Instant"
+    },
+    {
+     "id": "gpt-5-5-thinking",
+     "name": "GPT-5.5 — Thinking",
+     "supportsReasoning": true
+    },
+    {
+     "id": "gpt-5-5-pro",
+     "name": "GPT-5.5 — Pro",
+     "supportsReasoning": true
+    }
+   ],
+   "passthroughModels": false,
+   "thinkingConfig": null
+  },
+  {
    "id": "chutes",
    "alias": "chutes",
    "aliases": [
@@ -1661,7 +1731,8 @@
     },
     {
      "id": "deepseek-v4.1-flash",
-     "name": "DeepSeek V4.1 Flash"
+     "name": "DeepSeek V4.1 Flash",
+     "upstreamModelId": "deepseek-flash"
     },
     {
      "id": "deepseek-v4-flash",
@@ -1678,6 +1749,102 @@
     {
      "id": "deepseek-reasoner",
      "name": "DeepSeek V3.2 Reasoner"
+    }
+   ],
+   "passthroughModels": false,
+   "thinkingConfig": null
+  },
+  {
+   "id": "deepseek-web",
+   "alias": "deepseek-web",
+   "aliases": [
+    "ds-web"
+   ],
+   "category": "webCookie",
+   "authType": "cookie",
+   "authModes": null,
+   "noAuth": false,
+   "priority": 220,
+   "display": {
+    "name": "DeepSeek Web",
+    "color": "#4D6BFE",
+    "textIcon": "DS",
+    "icon": "auto_awesome",
+    "website": "https://chat.deepseek.com",
+    "apiKeyUrl": null,
+    "deprecated": false,
+    "deprecationNotice": null
+   },
+   "transport": {
+    "baseUrl": "https://chat.deepseek.com/api/v0/chat/completion",
+    "format": "openai",
+    "authType": "cookie"
+   },
+   "transports": null,
+   "oauth": null,
+   "models": [
+    {
+     "id": "deepseek-v4-pro",
+     "name": "DeepSeek V4 Pro"
+    },
+    {
+     "id": "deepseek-v4-pro-think",
+     "name": "DeepSeek V4 Pro Think",
+     "supportsReasoning": true
+    },
+    {
+     "id": "deepseek-v4-pro-search",
+     "name": "DeepSeek V4 Pro Search"
+    },
+    {
+     "id": "deepseek-v4-pro-think-search",
+     "name": "DeepSeek V4 Pro Think+Search",
+     "supportsReasoning": true
+    },
+    {
+     "id": "deepseek-v4-flash",
+     "name": "DeepSeek V4 Flash"
+    },
+    {
+     "id": "deepseek-v4-flash-think",
+     "name": "DeepSeek V4 Flash Think",
+     "supportsReasoning": true
+    },
+    {
+     "id": "deepseek-v4-flash-search",
+     "name": "DeepSeek V4 Flash Search"
+    },
+    {
+     "id": "deepseek-v4-flash-think-search",
+     "name": "DeepSeek V4 Flash Think+Search",
+     "supportsReasoning": true
+    },
+    {
+     "id": "deepseek-chat",
+     "name": "DeepSeek Chat"
+    },
+    {
+     "id": "deepseek-reasoner",
+     "name": "DeepSeek Reasoner",
+     "supportsReasoning": true
+    },
+    {
+     "id": "DeepSeek-R1",
+     "name": "DeepSeek R1",
+     "supportsReasoning": true
+    },
+    {
+     "id": "DeepSeek-R1-Search",
+     "name": "DeepSeek R1 Search",
+     "supportsReasoning": true
+    },
+    {
+     "id": "DeepSeek-V3.2",
+     "name": "DeepSeek V3.2"
+    },
+    {
+     "id": "DeepSeek-Search",
+     "name": "DeepSeek Search"
     }
    ],
    "passthroughModels": false,
@@ -1788,6 +1955,51 @@
    "thinkingConfig": null
   },
   {
+   "id": "gemini-web",
+   "alias": "gemini-web",
+   "aliases": [
+    "gweb"
+   ],
+   "category": "webCookie",
+   "authType": "cookie",
+   "authModes": null,
+   "noAuth": false,
+   "priority": 220,
+   "display": {
+    "name": "Gemini Web",
+    "color": "#4285F4",
+    "textIcon": "GW",
+    "icon": "auto_awesome",
+    "website": "https://gemini.google.com",
+    "apiKeyUrl": null,
+    "deprecated": false,
+    "deprecationNotice": null
+   },
+   "transport": {
+    "baseUrl": "https://gemini.google.com/app",
+    "format": "openai",
+    "authType": "cookie"
+   },
+   "transports": null,
+   "oauth": null,
+   "models": [
+    {
+     "id": "gemini-3.1-pro",
+     "name": "Gemini 3.1 Pro"
+    },
+    {
+     "id": "gemini-3.7-flash",
+     "name": "Gemini 3.7 Flash"
+    },
+    {
+     "id": "gemini-3.1-flash-lite",
+     "name": "Gemini 3.1 Flash-Lite"
+    }
+   ],
+   "passthroughModels": false,
+   "thinkingConfig": null
+  },
+  {
    "id": "github",
    "alias": "gh",
    "aliases": [],
@@ -1850,12 +2062,8 @@
    },
    "models": [
     {
-     "id": "gpt-5.2",
-     "name": "GPT-5.2"
-    },
-    {
-     "id": "gpt-5.2-codex",
-     "name": "GPT-5.2 Codex"
+     "id": "gpt-5-mini",
+     "name": "GPT-5 Mini"
     },
     {
      "id": "gpt-5.3-codex",
@@ -1870,52 +2078,100 @@
      "name": "GPT-5.4 Mini"
     },
     {
+     "id": "gpt-5.5",
+     "name": "GPT-5.5"
+    },
+    {
+     "id": "gpt-5.6-luna",
+     "name": "GPT-5.6 Luna"
+    },
+    {
+     "id": "gpt-5.6-sol",
+     "name": "GPT-5.6 Sol"
+    },
+    {
+     "id": "gpt-5.6-terra",
+     "name": "GPT-5.6 Terra"
+    },
+    {
+     "id": "gpt-6-astra",
+     "name": "GPT-6 Astra"
+    },
+    {
+     "id": "gpt-6-luna",
+     "name": "GPT-6 Luna"
+    },
+    {
+     "id": "gpt-6-sol",
+     "name": "GPT-6 Sol"
+    },
+    {
+     "id": "gpt-6.1-sol",
+     "name": "GPT-6.1 Sol"
+    },
+    {
+     "id": "claude-fable-5",
+     "name": "Claude Fable 5"
+    },
+    {
+     "id": "claude-fable-5.1",
+     "name": "Claude Fable 5.1"
+    },
+    {
      "id": "claude-haiku-4.5",
      "name": "Claude Haiku 4.5"
     },
     {
-     "id": "claude-opus-4.5",
-     "name": "Claude Opus 4.5"
+     "id": "claude-haiku-5.5",
+     "name": "Claude Haiku 5.5"
     },
     {
-     "id": "claude-sonnet-4.5",
-     "name": "Claude Sonnet 4.5"
+     "id": "claude-opus-4.8",
+     "name": "Claude Opus 4.8"
+    },
+    {
+     "id": "claude-opus-4.8-fast",
+     "name": "Claude Opus 4.8 (Fast)"
+    },
+    {
+     "id": "claude-opus-5",
+     "name": "Claude Opus 5"
+    },
+    {
+     "id": "claude-opus-5.5",
+     "name": "Claude Opus 5.5"
     },
     {
      "id": "claude-sonnet-4.6",
      "name": "Claude Sonnet 4.6"
     },
     {
-     "id": "claude-opus-4.6",
-     "name": "Claude Opus 4.6"
+     "id": "claude-sonnet-5",
+     "name": "Claude Sonnet 5"
     },
     {
-     "id": "claude-opus-4.7",
-     "name": "Claude Opus 4.7"
+     "id": "claude-sonnet-5.5",
+     "name": "Claude Sonnet 5.5"
     },
     {
-     "id": "gemini-2.5-pro",
-     "name": "Gemini 2.5 Pro"
+     "id": "gemini-3.7-flash",
+     "name": "Gemini 3.7 Flash"
     },
     {
-     "id": "gemini-3-flash-preview",
-     "name": "Gemini 3 Flash"
+     "id": "gemini-3.8-flash",
+     "name": "Gemini 3.8 Flash"
     },
     {
-     "id": "gemini-3.1-pro-preview",
-     "name": "Gemini 3.1 Pro"
+     "id": "gemini-4-argon",
+     "name": "Gemini 4 Argon"
     },
     {
-     "id": "grok-code-fast-1",
-     "name": "Grok Code Fast 1"
+     "id": "kimi-k3",
+     "name": "Kimi K3"
     },
     {
-     "id": "oswe-vscode-prime",
-     "name": "Raptor Mini"
-    },
-    {
-     "id": "goldeneye-free-auto",
-     "name": "GoldenEye"
+     "id": "mai-code-1.1-flash",
+     "name": "MAI-Code-1.1-Flash"
     }
    ],
    "passthroughModels": false,
@@ -3134,7 +3390,8 @@
       "hooks": [
        "museHeaders"
       ]
-     }
+     },
+     "thinkingFormat": "openai-responses"
     }
    ],
    "oauth": {
@@ -3185,6 +3442,43 @@
     }
    ],
    "passthroughModels": true,
+   "thinkingConfig": null
+  },
+  {
+   "id": "muse-web",
+   "alias": "muse-web",
+   "aliases": [
+    "mu"
+   ],
+   "category": "webCookie",
+   "authType": "cookie",
+   "authModes": null,
+   "noAuth": false,
+   "priority": 220,
+   "display": {
+    "name": "Muse Web",
+    "color": "#7C3AED",
+    "textIcon": "MU",
+    "icon": "auto_awesome",
+    "website": "https://muse.ai",
+    "apiKeyUrl": null,
+    "deprecated": false,
+    "deprecationNotice": null
+   },
+   "transport": {
+    "baseUrl": "https://muse.ai",
+    "format": "openai",
+    "authType": "cookie"
+   },
+   "transports": null,
+   "oauth": null,
+   "models": [
+    {
+     "id": "muse-chat",
+     "name": "Muse Chat"
+    }
+   ],
+   "passthroughModels": false,
    "thinkingConfig": null
   },
   {
@@ -3569,7 +3863,8 @@
     "quirks": {
      "forceAutoToolChoiceModels": [
       "muse-spark-1.3-contributor-free"
-     ]
+     ],
+     "reasoningAliasFields": true
     },
     "format": "openai"
    },
@@ -3716,6 +4011,63 @@
    "thinkingConfig": null
   },
   {
+   "id": "runcrate",
+   "alias": "runcrate",
+   "aliases": [
+    "rc"
+   ],
+   "category": "apikey",
+   "authType": "apikey",
+   "authModes": null,
+   "noAuth": false,
+   "priority": 65,
+   "display": {
+    "name": "Runcrate",
+    "color": "#1A2B79",
+    "textIcon": "RC",
+    "icon": "terminal",
+    "website": "https://www.runcrate.ai/inference/free?utm_source=9router&utm_medium=directory&utm_campaign=gpu_pricing",
+    "apiKeyUrl": "https://www.runcrate.ai/dashboard/api-keys",
+    "deprecated": false,
+    "deprecationNotice": null
+   },
+   "transport": {
+    "baseUrl": "https://api.runcrate.ai/v1/chat/completions",
+    "validateUrl": "https://www.runcrate.ai/api/v1/billing/balance",
+    "format": "openai"
+   },
+   "transports": null,
+   "oauth": null,
+   "models": [
+    {
+     "id": "deepseek-ai/DeepSeek-V4.1-Flash",
+     "name": "DeepSeek V4.1 Flash"
+    },
+    {
+     "id": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+     "name": "DeepSeek V4.1 Flash 1017"
+    },
+    {
+     "id": "zai-org/GLM-5.3",
+     "name": "GLM 5.3"
+    },
+    {
+     "id": "zai-org/GLM-5.3-Flash",
+     "name": "GLM 5.3 Flash"
+    },
+    {
+     "id": "Qwen/Qwen3.8-Flash",
+     "name": "Qwen3.8 Flash"
+    },
+    {
+     "id": "openai/gpt-oss-120b",
+     "name": "gpt-oss 120B"
+    }
+   ],
+   "passthroughModels": false,
+   "thinkingConfig": null
+  },
+  {
    "id": "sambanova",
    "alias": "samba",
    "aliases": [
@@ -3754,6 +4106,66 @@
    ],
    "passthroughModels": false,
    "thinkingConfig": null
+  },
+  {
+   "id": "sensenova",
+   "alias": "sensenova",
+   "aliases": [],
+   "category": "apikey",
+   "authType": "apikey",
+   "authModes": null,
+   "noAuth": false,
+   "priority": 999,
+   "display": {
+    "name": "SenseNova",
+    "color": "#5B5CE2",
+    "textIcon": "SN",
+    "icon": "auto_awesome",
+    "website": "https://token.sensenova.cn",
+    "apiKeyUrl": "https://token.sensenova.cn",
+    "deprecated": false,
+    "deprecationNotice": null
+   },
+   "transport": {
+    "baseUrl": "https://token.sensenova.cn/v1/chat/completions",
+    "validateUrl": "https://token.sensenova.cn/v1/models",
+    "format": "openai"
+   },
+   "transports": null,
+   "oauth": null,
+   "models": [
+    {
+     "id": "sensenova-6.8-flash-lite",
+     "name": "SenseNova 6.8 Flash Lite"
+    },
+    {
+     "id": "deepseek-v4-flash",
+     "name": "DeepSeek V4 Flash"
+    },
+    {
+     "id": "deepseek-flash",
+     "name": "DeepSeek V4.1 Flash"
+    },
+    {
+     "id": "glm-5.2",
+     "name": "GLM-5.2"
+    },
+    {
+     "id": "kimi-k3",
+     "name": "Kimi K3"
+    }
+   ],
+   "passthroughModels": false,
+   "thinkingConfig": {
+    "options": [
+     "none",
+     "low",
+     "medium",
+     "high",
+     "max"
+    ],
+    "defaultMode": "high"
+   }
   },
   {
    "id": "siliconflow",
@@ -4137,6 +4549,36 @@
    }
   },
   {
+   "id": "uc-web",
+   "alias": "uc",
+   "aliases": [],
+   "category": "webCookie",
+   "authType": "cookie",
+   "authModes": null,
+   "noAuth": false,
+   "priority": 180,
+   "display": {
+    "name": "UC Web",
+    "color": "#F43F5E",
+    "textIcon": "UC",
+    "icon": "explicit",
+    "website": "https://uncensored.com",
+    "apiKeyUrl": null,
+    "deprecated": false,
+    "deprecationNotice": null
+   },
+   "transport": {
+    "baseUrl": "https://internal.chatuncensored.ai",
+    "format": "openai",
+    "authType": "cookie"
+   },
+   "transports": null,
+   "oauth": null,
+   "models": [],
+   "passthroughModels": true,
+   "thinkingConfig": null
+  },
+  {
    "id": "venice",
    "alias": "venice",
    "aliases": [
@@ -4347,6 +4789,10 @@
    "transports": null,
    "oauth": null,
    "models": [
+    {
+     "id": "grok-4.7",
+     "name": "Grok 4.7"
+    },
     {
      "id": "grok-4.6",
      "name": "Grok 4.6"

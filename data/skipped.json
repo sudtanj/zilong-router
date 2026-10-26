@@ -1,8 +1,8 @@
 {
  "meta": {
-  "upstreamVersion": "0.5.104",
-  "upstreamCommit": "87a74e1bda3677193c6f71a7e2100c90311f0689",
-  "generatedAt": "2026-10-19"
+  "upstreamVersion": "0.5.111",
+  "upstreamCommit": "3a978a631ad65529c06e48ce495092d5bba29f46",
+  "generatedAt": "2026-10-26"
  },
  "skipped": [
   {
@@ -313,6 +313,11 @@
   {
    "id": "v1m",
    "name": "v1m (System One)",
+   "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "veoaifree-web",
+   "name": "Veo AI Free Web",
    "reason": "no LLM transport (media-only provider)"
   },
   {

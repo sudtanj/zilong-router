@@ -1,8 +1,8 @@
 {
  "meta": {
-  "upstreamVersion": "0.5.104",
-  "upstreamCommit": "87a74e1bda3677193c6f71a7e2100c90311f0689",
-  "generatedAt": "2026-10-19"
+  "upstreamVersion": "0.5.111",
+  "upstreamCommit": "3a978a631ad65529c06e48ce495092d5bba29f46",
+  "generatedAt": "2026-10-26"
  },
  "freeNamespaces": [
   "cline-free/"
@@ -703,6 +703,14 @@
    "cached": 0.3,
    "reasoning": 15,
    "cache_creation": 3
+  },
+  {
+   "model": "kimi-k3.1-pro",
+   "input": 2,
+   "output": 10,
+   "cached": 0.2,
+   "reasoning": 10,
+   "cache_creation": 2
   },
   {
    "model": "kimi-k2.7-code",

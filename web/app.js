@@ -169,6 +169,7 @@ const PAGE_INFO = {
   providers: {title: 'Providers', description: 'Manage your AI provider connections', icon: 'dns'},
   usage: {title: 'Usage & Analytics', description: 'Monitor your API usage, token consumption, and request logs', icon: 'bar_chart'},
   'token-saver': {title: 'Token Saver', description: 'Compress prompts and outputs to save tokens', icon: 'savings'},
+  mcp: {title: 'MCP Gateway', description: 'One MCP endpoint in front of all your MCP servers', icon: 'hub'},
   'console-log': {title: 'Console Log', description: 'Live server console output', icon: 'monitor'},
   profile: {title: 'Settings', description: 'Manage your preferences', icon: 'settings'},
 };
@@ -514,11 +515,11 @@ actions.keyAllowRemove = async ({id, model}) => {
 };
 actions.keyAllowAdd = async ({id}) => {
   const k = keyCache.find((x) => x.id === id);
-  const provs = await providerList();
-  const models = provs.flatMap((p) => p.models.map((m) => p.alias + '/' + m.id));
+  const [provs, mcpList] = await Promise.all([providerList(), get('/mcp/servers').catch(() => ({servers: []}))]);
+  const models = [...provs.flatMap((p) => p.models.map((m) => p.alias + '/' + m.id)), 'mcp/*', ...mcpList.servers.map((s) => 'mcp/' + s.id)];
   openModal({
     title: `Allowed for "${k.name || ''}"`,
-    body: `<div class="field"><label>Model</label><input class="input mono" name="model" list="model-list" placeholder="provider/model" required autocomplete="off"><datalist id="model-list">${models.map((m) => `<option value="${esc(m)}">`).join('')}</datalist><p class="hint">Pick from the list or type any <code>provider/model</code> or alias.</p></div>` + twoButtons('Add'),
+    body: `<div class="field"><label>Model or MCP server</label><input class="input mono" name="model" list="model-list" placeholder="provider/model" required autocomplete="off"><datalist id="model-list">${models.map((m) => `<option value="${esc(m)}">`).join('')}</datalist><p class="hint">Pick from the list or type any <code>provider/model</code> or alias; <code>mcp/&lt;server&gt;</code> (or <code>mcp/*</code>) lets the key use that MCP server through <code>/mcp</code>.</p></div>` + twoButtons('Add'),
     onSubmit: async (f) => {
       const v = f.model.value.trim(); if (!v) return false;
       if (!k.accessAllow.some((m) => m.toLowerCase() === v.toLowerCase())) await patch('/keys/' + id, {accessRestricted: true, accessAllow: [...k.accessAllow, v]});
@@ -526,6 +527,145 @@ actions.keyAllowAdd = async ({id}) => {
     },
   });
 };
+
+// ----- MCP Gateway (zilong-router's own; no upstream page) --------------------------
+let mcpCache = [];
+const mcpPath = (id, rest = '') => '/mcp/servers/' + encodeURIComponent(id) + rest;
+const slugify = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32).replace(/-+$/, '');
+const mcpStatus = (s) => !s.enabled ? badge('Disabled')
+  : s.status === 'running' ? badge('Running', 'success', true)
+  : s.status === 'busy' ? badge('Starting', 'warning', true)
+  : s.stats.lastError && s.toolCount == null ? badge('Error', 'error', true)
+  : badge('Stopped', '', true);
+pages.mcp = async () => {
+  const d = await get('/mcp/servers');
+  mcpCache = d.servers;
+  const url = location.origin + '/mcp';
+  const claude = `claude mcp add --transport http zilong-router ${url} --header "Authorization: Bearer <api-key>"`;
+  const jsonCfg = JSON.stringify({mcpServers: {'zilong-router': {type: 'http', url, headers: {Authorization: 'Bearer <api-key>'}}}}, null, 2);
+  const copyRow = (label, value) => `<div class="row"><span class="codepill">${esc(label)}</span><input class="input mono grow" value="${esc(value)}" readonly>
+      <button class="tiny" data-act="copy" data-text="${esc(value)}" title="Copy">${ms('content_copy', 18)}</button></div>`;
+  const buttons = `<button class="btn ghost" data-act="mcpImport">${ms('upload')}Import JSON</button><button class="btn primary" data-act="mcpAdd">${ms('add')}Add server</button>`;
+  const idle = d.idleSecs ? `stop after ${d.idleSecs >= 60 ? Math.round(d.idleSecs / 6) / 10 + ' min' : d.idleSecs + ' s'} without calls` : 'keep running once started (MCP_IDLE_SECS=0)';
+  return `<div class="page gap8">
+    <div class="card">
+      <h2 class="ct mb4">${ms('hub')}Connect your agent</h2>
+      <p class="sm muted mb4">One MCP endpoint for every server below. Instead of hundreds of tool definitions the agent gets four meta tools (<code>search_tools</code>, <code>get_tool_schemas</code>, <code>call_tool</code>, <code>list_servers</code>), so its context stays small however many servers you add.</p>
+      <div class="col gap2">${copyRow('Meta tools', url)}${copyRow('All tools', url + '/all')}</div>
+      <p class="xs muted mt1"><code>/mcp/all</code> lists every tool directly as <code>server__tool</code> instead. From other machines send an API key from <a href="#/endpoint">Endpoint &amp; Key</a>; a restricted key only reaches the servers on its list as <code>mcp/&lt;server&gt;</code> (or <code>mcp/*</code> for all).</p>
+      <p class="sm medium mt4 mb2">Claude Code</p>
+      <div class="row"><input class="input mono grow" value="${esc(claude)}" readonly><button class="tiny" data-act="copy" data-text="${esc(claude)}" title="Copy">${ms('content_copy', 18)}</button></div>
+      <p class="sm medium mt4 mb2">Cursor, Windsurf, VS Code and other JSON configs</p>
+      <div class="row"><textarea class="input mono grow" rows="9" readonly>${esc(jsonCfg)}</textarea><button class="tiny" data-act="copy" data-text="${esc(jsonCfg)}" title="Copy">${ms('content_copy', 18)}</button></div>
+    </div>
+    <div class="card">
+      <div class="row between wrap mb4" style="gap:8px"><h2 class="ct">${ms('dns')}Servers</h2><div class="row gap2">${buttons}</div></div>
+      ${mcpCache.length === 0 ? `<div class="empty">
+          <div class="ring">${ms('hub', 32)}</div>
+          <p class="medium" style="margin-bottom:4px">No MCP servers yet</p>
+          <p class="sm muted mb4">Add one, or paste the <code>mcpServers</code> JSON from Claude Desktop, Cursor or VS Code.</p>
+          <div class="row gap2" style="justify-content:center">${buttons}</div></div>`
+        : `<div class="col">${mcpCache.map(mcpRow).join('')}</div>`}
+      <p class="xs muted mt4">Remote servers only (Streamable HTTP or SSE): the router never runs server processes itself. Connections open on first use and ${idle}. Tool lists are cached, so searching does not connect; use ${ms('refresh', 14)} after a server gains tools. Calls and errors also go to the <a href="#/console-log">Console Log</a>.</p>
+    </div>
+  </div>`;
+};
+function mcpRow(s) {
+  const target = s.url;
+  const st = s.stats || {};
+  const calls = st.calls ? ` · ${fmt(st.calls)} calls, ${fmt(st.errors)} errors, ${Math.round(st.totalMs / st.calls)} ms avg` : '';
+  const tools = s.toolCount != null ? `<a href="#" data-act="mcpTools" data-id="${esc(s.id)}" style="color:var(--primary)">${s.toolCount} tools</a> · listed ${relTime(s.toolsFetchedAt).toLowerCase()}` : 'Tools not listed yet';
+  return `<div class="keyrow ${s.enabled ? '' : 'off'}">
+    <div class="grow" style="min-width:0">
+      <div class="row wrap" style="gap:8px"><p class="sm medium">${esc(s.name)}</p><code>${esc(s.id)}</code>${badge(s.transport === 'sse' ? 'SSE' : 'HTTP', 'primary')}${mcpStatus(s)}</div>
+      <p class="xs muted mono mt1 truncate" title="${esc(target)}">${esc(target)}</p>
+      ${s.description ? `<p class="xs muted mt1">${esc(s.description)}</p>` : ''}
+      <p class="xs muted mt1">${tools}${calls}</p>
+      ${st.lastError ? `<p class="xs danger mt1 break">${esc(st.lastError)}</p>` : ''}
+    </div>
+    <div class="row gap2 shrink0" style="padding-top:2px">
+      <button class="tiny" data-act="mcpRefresh" data-id="${esc(s.id)}" title="Reconnect and list tools">${ms('refresh', 18)}</button>
+      ${s.status === 'running' ? `<button class="tiny" data-act="mcpStop" data-id="${esc(s.id)}" title="Disconnect">${ms('stop_circle', 18)}</button>` : ''}
+      <button class="tiny" data-act="mcpEdit" data-id="${esc(s.id)}" title="Edit">${ms('edit', 18)}</button>
+      ${toggle(s.enabled, `data-act="mcpToggle" data-id="${esc(s.id)}" title="${s.enabled ? 'Disable' : 'Enable'}"`, 'sm')}
+      <button class="tiny red del" data-act="mcpDelete" data-id="${esc(s.id)}" style="padding:8px">${ms('delete', 18)}</button>
+    </div>
+  </div>`;
+}
+const linesToMap = (text, sep) => Object.fromEntries(text.split('\n').map((l) => l.trim()).filter(Boolean)
+  .map((l) => { const i = l.indexOf(sep); return i < 0 ? [l, ''] : [l.slice(0, i).trim(), l.slice(i + 1).trim()]; }));
+const mapToLines = (o, sep) => Object.entries(o || {}).map(([k, v]) => k + sep + v).join('\n');
+function mcpForm(s) {
+  const edit = !!s;
+  s = s || {transport: 'http', headers: {}};
+  const {form} = openModal({
+    title: edit ? `Edit ${s.name}` : 'Add MCP server',
+    body: `<div class="row gap2" style="align-items:flex-start"><div class="grow">${field('name', 'Name', {value: s.name, placeholder: 'GitHub', required: true})}</div>
+        <div class="grow">${field('sid', 'Id', {value: s.id, placeholder: 'github', mono: true, hint: edit ? 'Cannot be changed.' : 'a-z, 0-9 and -. Tools are named <code>id__tool</code>.'})}</div></div>
+      ${field('description', 'Description', {value: s.description, placeholder: 'Issues, pull requests and code search', hint: 'Shown to agents by <code>list_servers</code>, so they know what the server is for.'})}
+      ${field('transport', 'Transport', {type: 'select', value: s.transport, options: [{value: 'http', label: 'Streamable HTTP (one URL, usually …/mcp)'}, {value: 'sse', label: 'SSE (older servers, usually …/sse)'}]})}
+      ${field('url', 'URL', {value: s.url, placeholder: 'https://example.com/mcp', mono: true, required: true})}
+      ${field('headers', 'Headers (Name: value, one per line)', {type: 'textarea', rows: 3, value: mapToLines(s.headers, ': '), placeholder: 'Authorization: Bearer …'})}
+      ${field('timeoutSecs', 'Call timeout in seconds', {type: 'number', min: 0, value: s.timeoutSecs || '', placeholder: '120'})}
+      ${edit ? '<p class="hint mb4">Values of secret-looking headers show as ••••••••; leave them as they are to keep them.</p>' : ''}
+      ${twoButtons(edit ? 'Save' : 'Add server')}`,
+    onSubmit: async (f) => {
+      const body = {
+        name: f.name.value.trim(), description: f.description.value.trim(), transport: f.transport.value,
+        url: f.url.value.trim(), headers: linesToMap(f.headers.value, ':'), timeoutSecs: Number(f.timeoutSecs.value) || 0,
+      };
+      if (edit) await patch(mcpPath(s.id), body);
+      else await post('/mcp/servers', {...body, id: f.sid.value.trim() || slugify(body.name), enabled: true});
+      notify('success', edit ? 'Server saved' : 'Server added. Its tools are listed on first use, or now with the refresh button.');
+      reload();
+    },
+  });
+  if (edit) form.sid.readOnly = true;
+  else {
+    form.sid.oninput = () => (form.sid.dataset.touched = '1');
+    form.name.oninput = () => { if (!form.sid.dataset.touched) form.sid.value = slugify(form.name.value); };
+  }
+}
+const mcpToolsModal = (title, tools) => openModal({
+  title: `${title} · ${tools.length} tools`, size: 'wide',
+  body: tools.length ? `<div class="col">${tools.map((t) => `<div style="padding:8px 0;border-bottom:1px solid var(--divider)">
+      <p class="sm medium mono">${esc(t.name)}</p>
+      ${t.description ? `<p class="xs muted mt1">${esc(t.description.length > 300 ? t.description.slice(0, 300) + '…' : t.description)}</p>` : ''}
+      ${t.parameters ? `<p class="xs mono mt1">${esc(t.parameters)}</p>` : ''}</div>`).join('')}</div>`
+    : '<p class="sm muted">This server has no tools.</p>',
+});
+actions.mcpAdd = () => mcpForm(null);
+actions.mcpEdit = ({id}) => mcpForm(mcpCache.find((s) => s.id === id));
+actions.mcpToggle = async ({id}, b) => { await patch(mcpPath(id), {enabled: b.getAttribute('aria-checked') !== 'true'}); reload(); };
+actions.mcpStop = async ({id}) => { await post(mcpPath(id, '/stop')); reload(); };
+actions.mcpDelete = async ({id}) => {
+  const s = mcpCache.find((x) => x.id === id);
+  if (await confirmModal({title: 'Delete MCP server', message: `Delete "${s.name}"? Agents lose its tools.`, confirmText: 'Delete'})) { await del(mcpPath(id)); reload(); }
+};
+actions.mcpTools = async ({id}) => {
+  const s = mcpCache.find((x) => x.id === id);
+  mcpToolsModal(s.name, (await get(mcpPath(id, '/tools'))).tools);
+};
+actions.mcpRefresh = async ({id}, b) => {
+  const icon = $('.ms', b); if (icon) icon.classList.add('spin');
+  try {
+    const r = await post(mcpPath(id, '/refresh'));
+    mcpToolsModal(r.server.name, r.tools);
+  } finally { reload(); }
+};
+actions.mcpImport = () => openModal({
+  title: 'Import MCP servers', size: 'wide',
+  body: field('config', 'mcpServers JSON', {type: 'textarea', rows: 12,
+      placeholder: '{\n  "mcpServers": {\n    "github": {\n      "type": "http",\n      "url": "https://api.githubcopilot.com/mcp/",\n      "headers": {"Authorization": "Bearer ghp_…"}\n    },\n    "legacy": {"type": "sse", "url": "https://example.com/sse"}\n  }\n}',
+      hint: 'As written by Claude Desktop (<code>claude_desktop_config.json</code>), Cursor (<code>~/.cursor/mcp.json</code>), Windsurf or VS Code (<code>servers</code>). Only servers with a URL are imported; local <code>command</code> servers are not supported. Servers whose id already exists are skipped.'})
+    + twoButtons('Import'),
+  onSubmit: async (f) => {
+    const r = await post('/mcp/import', {config: f.config.value});
+    const rejected = r.rejected || [];
+    notify(rejected.length && !r.added.length ? 'error' : 'success', `Added ${r.added.length} server(s)${r.skipped.length ? `; skipped existing: ${r.skipped.join(', ')}` : ''}${rejected.length ? `; not imported: ${rejected.join('; ')}` : ''}`);
+    reload();
+  },
+});
 
 // ----- Providers (upstream providers/page.js) --------------------------------------
 let provCache = null, connCache = null;

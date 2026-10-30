@@ -13,6 +13,7 @@ use serde_json::{json, Value};
 use time::OffsetDateTime;
 
 use crate::db::{now_iso, Db, ProviderConnection};
+use crate::mcp::{self, ServerConfig};
 use crate::providers::Registry;
 use crate::state::AppState;
 
@@ -951,4 +952,117 @@ pub async fn oauth_exchange(State(state): S, Path(provider): Path<String>, Json(
 
 pub async fn oauth_poll(State(state): S, Path(provider): Path<String>, Json(b): Json<OauthStep>) -> R {
     crate::oauth::poll(&state, &provider, &b.session).await.map(Json).map_err(|e| bad(e.to_string()))
+}
+
+// ----- MCP gateway ------------------------------------------------------------------
+
+fn mcp_server_json(state: &AppState, s: &ServerConfig) -> Value {
+    let mut v = serde_json::to_value(s.masked()).unwrap_or(Value::Null);
+    let cached = mcp::cached_tools(&state.db, &s.id);
+    v["status"] = json!(state.mcp.status(&s.id));
+    v["toolCount"] = json!(cached.as_ref().map(|c| c.tools.len()));
+    v["toolsFetchedAt"] = json!(cached.map(|c| c.fetched_at));
+    v["stats"] = json!(state.mcp.stats(&s.id));
+    v
+}
+
+fn mcp_tool_rows(tools: &[Value]) -> Vec<Value> {
+    tools
+        .iter()
+        .map(|t| {
+            json!({
+                "name": mcp::tool_name(t),
+                "description": mcp::tool_description(t),
+                "parameters": mcp::params_summary(t.get("inputSchema").unwrap_or(&Value::Null)),
+            })
+        })
+        .collect()
+}
+
+pub async fn mcp_servers(State(state): S) -> R {
+    let list: Vec<Value> = mcp::servers(&state.db).iter().map(|s| mcp_server_json(&state, s)).collect();
+    Ok(Json(json!({"servers": list, "idleSecs": state.cfg.mcp_idle_secs})))
+}
+
+pub async fn mcp_add(State(state): S, Json(mut b): Json<ServerConfig>) -> R {
+    b.validate().map_err(bad)?;
+    if mcp::server(&state.db, &b.id).is_some() {
+        return Err(bad(format!("a server with id `{}` already exists", b.id)));
+    }
+    mcp::save_server(&state.db, &b)?;
+    Ok(Json(mcp_server_json(&state, &b)))
+}
+
+/// Partial update: fields left out keep their value, masked secrets stay as stored.
+pub async fn mcp_patch(State(state): S, Path(id): Path<String>, Json(patch): Json<Value>) -> R {
+    let old = mcp::server(&state.db, &id).ok_or_else(not_found)?;
+    let mut merged = serde_json::to_value(&old).map_err(|e| bad(e.to_string()))?;
+    if let (Some(m), Some(p)) = (merged.as_object_mut(), patch.as_object()) {
+        for (k, v) in p.iter().filter(|(k, _)| *k != "id") {
+            m.insert(k.clone(), v.clone());
+        }
+    }
+    let mut cfg: ServerConfig = serde_json::from_value(merged).map_err(|e| bad(e.to_string()))?;
+    cfg.id = old.id.clone();
+    cfg.unmask(&old);
+    cfg.validate().map_err(bad)?;
+    mcp::save_server(&state.db, &cfg)?;
+    if !cfg.enabled || !cfg.same_target(&old) {
+        state.mcp.stop(&id).await;
+    }
+    Ok(Json(mcp_server_json(&state, &cfg)))
+}
+
+pub async fn mcp_delete(State(state): S, Path(id): Path<String>) -> R {
+    mcp::server(&state.db, &id).ok_or_else(not_found)?;
+    mcp::delete_server(&state.db, &id)?;
+    state.mcp.forget(&id).await;
+    Ok(Json(json!({"ok": true})))
+}
+
+/// Restarts the server and fetches its tool list again.
+pub async fn mcp_refresh(State(state): S, Path(id): Path<String>) -> R {
+    let cfg = mcp::server(&state.db, &id).ok_or_else(not_found)?;
+    state.mcp.stop(&id).await;
+    let tools = state.mcp.tools(&state, &cfg, true).await;
+    let tools = tools.map_err(|e| AdminError(StatusCode::BAD_GATEWAY, format!("{e:#}")))?;
+    Ok(Json(json!({"tools": mcp_tool_rows(&tools), "server": mcp_server_json(&state, &cfg)})))
+}
+
+pub async fn mcp_tools(State(state): S, Path(id): Path<String>) -> R {
+    mcp::server(&state.db, &id).ok_or_else(not_found)?;
+    let c = mcp::cached_tools(&state.db, &id).unwrap_or_default();
+    Ok(Json(json!({"tools": mcp_tool_rows(&c.tools), "fetchedAt": c.fetched_at})))
+}
+
+pub async fn mcp_stop(State(state): S, Path(id): Path<String>) -> R {
+    state.mcp.stop(&id).await;
+    Ok(Json(json!({"ok": true})))
+}
+
+#[derive(Deserialize)]
+pub struct McpImport {
+    config: Value,
+}
+
+/// Adds the servers of a pasted `mcpServers` config; ids that already exist are skipped.
+pub async fn mcp_import(State(state): S, Json(b): Json<McpImport>) -> R {
+    let v = match b.config {
+        // Also accept the inside of `"mcpServers": {...}` pasted without the outer braces.
+        Value::String(s) => serde_json::from_str(&s)
+            .or_else(|_| serde_json::from_str(&format!("{{{s}}}")))
+            .map_err(|e| bad(format!("invalid JSON: {e}")))?,
+        v => v,
+    };
+    let (mut added, mut skipped) = (Vec::new(), Vec::new());
+    let (configs, rejected) = mcp::parse_import(&v).map_err(bad)?;
+    for cfg in configs {
+        if mcp::server(&state.db, &cfg.id).is_some() {
+            skipped.push(cfg.id);
+        } else {
+            mcp::save_server(&state.db, &cfg)?;
+            added.push(cfg.id);
+        }
+    }
+    Ok(Json(json!({"added": added, "skipped": skipped, "rejected": rejected})))
 }

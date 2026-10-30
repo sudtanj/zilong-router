@@ -130,6 +130,11 @@ impl Caller {
             }
         }
     }
+
+    /// MCP servers use the same allow list: `mcp/<server id>`, or `mcp/*` for all.
+    pub fn may_use_mcp(&self, server: &str) -> bool {
+        self.may_use("mcp", server) || self.may_use("mcp", "*")
+    }
 }
 
 pub enum AuthError {

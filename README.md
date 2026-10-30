@@ -27,6 +27,9 @@ Orange Pi Zero 3:
   falls back (or rotates) across every connected provider.
 - OAuth sign-in and free providers (Claude, GitHub Copilot, xAI, Kimi, Cline, OpenCode
   and more), plus the RTK / Caveman token saver.
+- An MCP gateway (`/mcp`): one MCP endpoint in front of all your MCP servers, with
+  Composio-style meta tools (search, schema, call) so the agent's context holds four tool
+  definitions instead of hundreds. See [MCP gateway](#mcp-gateway).
 - A port of the 9router web dashboard, served by the same binary with no Node and no
   build step.
 - Usage and cost per request in SQLite, priced from upstream's pricing table, with
@@ -36,7 +39,7 @@ Orange Pi Zero 3:
   hand-maintained provider list.
 - <!-- bench:summary -->Small: a 6.4 MiB binary that is ready 24 ms after start and idles at 7.9 MiB RSS; 100 concurrent streaming requests with 32 KiB prompts peak at 42.0 MiB (1 worker thread(s); see [Benchmark](#benchmark)).<!-- /bench:summary -->
 
-Not (yet) included: Gemini wire format, model combos, the Responses API, embeddings,
+Not (yet) included: Gemini wire format, model combos, embeddings,
 image/audio, and providers that need IDE-impersonation executors (Cursor, Windsurf, Kiro
 …); see the [Roadmap](#roadmap). Providers that need those are listed in
 `data/skipped.json` after each sync.
@@ -177,6 +180,54 @@ compression (Headroom), which needs a Python proxy and ML models:
 
 A client can skip all of them for one request with the header `x-9router-token-saver: off`.
 
+## MCP gateway
+
+Agents connect to one MCP server, `http://<router>:20128/mcp` (Streamable HTTP), and reach
+every MCP server you register in the dashboard's **MCP Gateway** page. Like Composio's tool
+router, the gateway does not list the upstream tools; it offers four meta tools:
+
+| Tool | What it does |
+|---|---|
+| `search_tools` | Keyword search over the tools of every server (`query`, optional `server`, `limit`). Returns `server__tool` names, a one-line description and a parameter summary such as `path: string, recursive?: boolean`. |
+| `get_tool_schemas` | Full description and JSON input schema of the named tools. |
+| `call_tool` | Runs `tool` (`server__tool`) with `arguments` and returns the upstream result unchanged. |
+| `list_servers` | The servers, their descriptions and tool counts. |
+
+So the agent's prompt carries four tool definitions however many servers sit behind the
+gateway. Clients that would rather see every tool can use `/mcp/all`, which lists them
+directly as `<server>__<tool>`.
+
+```sh
+claude mcp add --transport http zilong-router http://<router>:20128/mcp \
+  --header "Authorization: Bearer <api-key>"
+```
+
+```json
+{"mcpServers": {"zilong-router": {"type": "http", "url": "http://<router>:20128/mcp",
+  "headers": {"Authorization": "Bearer <api-key>"}}}}
+```
+
+- **Upstream servers are remote only**: Streamable HTTP (one URL; JSON and SSE answers
+  and `Mcp-Session-Id` sessions are handled, and an expired session is renewed) or the
+  older HTTP+SSE transport (a `GET /sse` event stream that names the endpoint to POST
+  to), each with headers for credentials. The router never runs MCP server processes
+  (stdio `command` servers) on its own machine; run those elsewhere behind an HTTP
+  bridge such as `supergateway` or `mcp-proxy`. Add servers one by one or paste the
+  `mcpServers` JSON from Claude Desktop, Cursor, Windsurf or VS Code: entries with a URL
+  are imported (`"type": "sse"` or a URL ending in `/sse` means SSE), `command` entries
+  are reported and skipped. Secret-looking headers are masked in the dashboard.
+- **On demand**: a connection opens on the server's first call and closes after
+  `MCP_IDLE_SECS` (default 300; 0 keeps it open) without calls. Each server's tool list is
+  cached in the database, so `search_tools` does not connect; the refresh button (or a
+  `tools/list_changed` notification) reloads it.
+- **Access**: the API keys of `/v1`, with the same rules (loopback clients need no key
+  unless `requireApiKey` is set). A restricted key reaches only the servers on its allow
+  list as `mcp/<server id>`, or all of them with `mcp/*`.
+- **Observability**: the page shows each server's state, tool count, calls, errors, the
+  last error; every call is logged to the Console Log.
+- Server definitions live in the `kv` table (scopes `mcpServers` and `mcpTools`), so the
+  Turso mirror carries them.
+
 ## Dashboard
 
 Open `http://pi:20128/` in a browser. The dashboard is a faithful port of 9router's
@@ -252,7 +303,7 @@ is 9router's, so an existing `~/.9router` data directory can be reused as `DATA_
 
 Environment variables: `PORT`, `HOSTNAME`, `DATA_DIR`, `REQUIRE_API_KEY`, `RUST_LOG`,
 `HTTPS_PROXY`, `STREAM_STALL_TIMEOUT_MS`, `FETCH_CONNECT_TIMEOUT_MS`, `API_KEY_SECRET`,
-`MACHINE_ID_SALT`. See `deploy/config.example.toml` for the file form.
+`MACHINE_ID_SALT`, `MCP_IDLE_SECS`. See `deploy/config.example.toml` for the file form.
 
 ## Keeping providers in sync with 9router
 
@@ -383,17 +434,9 @@ opens, and every sync interval (plus once on clean shutdown) pushes changes back
 
 Planned, roughly in order of interest. Nothing here is implemented yet.
 
-- **MCP gateway (meta tools).** One MCP endpoint that fronts many MCP servers, so a coding
-  tool connects once instead of configuring each server:
-  - register upstream MCP servers (stdio command or Streamable HTTP/SSE URL) from the
-    dashboard, with per-server enable/disable and credentials;
-  - a small set of meta tools (for example search tools, describe a tool, call a tool)
-    so the client sees a few tools instead of hundreds, keeping prompts short;
-  - tool names namespaced per server to avoid clashes, and per-API-key access control;
-  - calls and errors logged next to LLM usage in the dashboard;
-  - stdio servers started on demand and stopped when idle, to fit in 1 GB.
+- MCP gateway: OAuth sign-in for upstream MCP servers that require it, and resources and
+  prompts next to tools.
 - Gemini wire format (`/v1beta/models/...:generateContent`).
-- OpenAI Responses API (`/v1/responses`).
 - Model combos (one name that falls back through a list of provider/model pairs).
 - Embeddings, image and audio endpoints.
 - Providers that need IDE-impersonation executors (Cursor, Windsurf, Kiro, Codex,

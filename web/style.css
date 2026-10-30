@@ -358,7 +358,8 @@ table.recent .dot{display:block;width:6px;height:6px;border-radius:50%}
 .dbstat .ms{margin-left:auto}
 /* console log (upstream ConsoleLogClient) */
 .console{background:#000;border-radius:0 0 14px 14px;padding:16px;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;height:calc(100vh - 220px);overflow-y:auto;white-space:pre-wrap;word-break:break-word;color:#4ade80}
-.console .l-WARN{color:#facc15}.console .l-ERROR{color:#f87171}.console .l-INFO{color:#60a5fa}.console .l-DEBUG,.console .l-TRACE{color:#c084fc}
+.console .l-WARN{color:#facc15}
+.console .l-ERROR{color:#f87171}.console .l-INFO{color:#60a5fa}.console .l-DEBUG,.console .l-TRACE{color:#c084fc}
 .card.flush{padding:0;overflow:hidden}
 
 /* Donate (upstream Header pill + DonateModal) */

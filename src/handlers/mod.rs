@@ -39,6 +39,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/v1/v1/chat/completions", post(chat::chat_completions))
         .route("/v1/v1/messages", post(chat::messages))
         .route("/v1/v1/responses", post(responses::responses))
+        .route("/mcp", post(crate::mcp::server::meta).get(crate::mcp::server::not_allowed))
+        .route("/mcp/all", post(crate::mcp::server::all).get(crate::mcp::server::not_allowed))
         .merge(crate::dashboard::routes(state.clone()))
         .layer(DefaultBodyLimit::max(state.cfg.max_body_bytes))
         .layer(cors)

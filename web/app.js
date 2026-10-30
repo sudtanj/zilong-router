@@ -677,10 +677,16 @@ actions.mcpSignIn = async ({id}) => {
   let channel = null;
   const m = openModal({
     title: 'Sign in to ' + s.name,
-    body: `<ol class="sm muted" style="margin:0 0 12px 18px;line-height:1.7">
+    body: (r.redirectUri.startsWith(location.origin + '/') ? `<ol class="sm muted" style="margin:0 0 12px 18px;line-height:1.7">
         <li>Open the sign-in page, log in and allow access.</li>
         <li>You come back to <code>${esc(r.redirectUri)}</code>, which finishes the sign-in; this window closes by itself.</li>
-        <li>If that page does not load, copy its whole address from the address bar and paste it below.</li></ol>
+        <li>If that page does not load, copy its whole address from the address bar and paste it below.</li></ol>`
+      : `<ol class="sm muted" style="margin:0 0 12px 18px;line-height:1.7">
+        <li>Open the sign-in page, log in and allow access.</li>
+        <li>This server only accepts https or <code>localhost</code> addresses, so it sends you to <code>${esc(r.redirectUri)}</code>. That page will not load (unless the router runs on this computer); that is expected.</li>
+        <li>Copy its whole address from the address bar and paste it below.</li></ol>
+        <p class="xs muted mb4">Open this dashboard over https (for example Tailscale Serve) to skip the copy and paste.</p>`)
+      + `
       <a class="btn primary full mb4" href="${esc(r.authUrl)}" target="_blank" rel="noopener">${ms('open_in_new')}Open sign-in page</a>`
       + field('callback', 'Callback URL', {type: 'textarea', rows: 3, placeholder: r.redirectUri + '?code=…&state=…', required: true})
       + twoButtons('Connect'),

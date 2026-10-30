@@ -480,11 +480,26 @@ struct Pending {
 /// Sign-ins waiting for their callback, by `state`.
 static PENDING: LazyLock<Mutex<HashMap<String, Pending>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// `uri` with its host swapped for `localhost` when it is plain http on another host.
+/// Many authorization servers (Composio's, for one) register only https and loopback
+/// redirects (RFC 8252), so a dashboard opened at `http://pi:20128` registers
+/// `http://localhost:20128/...` instead and the user pastes the callback address.
+fn loopback_redirect(uri: &str) -> Option<String> {
+    let mut url = Url::parse(uri).ok()?;
+    let host = url.host_str()?.trim_start_matches('[').trim_end_matches(']').to_ascii_lowercase();
+    if url.scheme() != "http" || host == "localhost" || host == "127.0.0.1" || host == "::1" {
+        return None;
+    }
+    url.set_host(Some("localhost")).ok()?;
+    Some(url.to_string())
+}
+
 /// Begins a sign-in to `cfg`; the browser must reach `{origin}/mcp/oauth/callback`.
 /// Answers `{session, authUrl, redirectUri}`.
 pub async fn start(state: &AppState, cfg: &ServerConfig, origin: &str) -> Result<Value> {
-    let redirect_uri = format!("{}{CALLBACK_PATH}", origin.trim().trim_end_matches('/'));
+    let mut redirect_uri = format!("{}{CALLBACK_PATH}", origin.trim().trim_end_matches('/'));
     Url::parse(&redirect_uri).context("invalid dashboard origin")?;
+    let loopback = loopback_redirect(&redirect_uri);
     let mut a = discover(state, cfg).await?;
     if !cfg.oauth_client_id.trim().is_empty() {
         a.client_id = cfg.oauth_client_id.trim().to_string();
@@ -492,16 +507,29 @@ pub async fn start(state: &AppState, cfg: &ServerConfig, origin: &str) -> Result
     } else {
         // Reuse the client registered earlier with the same server and redirect URI.
         let reuse = load(&state.db, &cfg.id)
-            .filter(|old| old.issuer == a.issuer && old.registered_redirect == redirect_uri)
+            .filter(|old| {
+                old.issuer == a.issuer
+                    && (old.registered_redirect == redirect_uri || loopback.as_ref() == Some(&old.registered_redirect))
+            })
             .filter(|old| !old.client_id.is_empty());
         match reuse {
             Some(old) => {
                 a.client_id = old.client_id;
                 a.client_secret = old.client_secret;
                 a.token_auth_method = old.token_auth_method;
+                redirect_uri = old.registered_redirect.clone();
                 a.registered_redirect = old.registered_redirect;
             }
-            None => register(state, &mut a, &redirect_uri).await?,
+            None => match (register(state, &mut a, &redirect_uri).await, loopback) {
+                (Ok(()), _) => {}
+                (Err(e), Some(loopback)) if !a.registration_endpoint.is_empty() => {
+                    register(state, &mut a, &loopback)
+                        .await
+                        .with_context(|| format!("{e:#}; also with redirect {loopback}"))?;
+                    redirect_uri = loopback;
+                }
+                (Err(e), _) => return Err(e),
+            },
         }
     }
 
@@ -588,6 +616,16 @@ pub fn parse_callback(pasted: &str) -> (String, Option<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plain_http_redirects_fall_back_to_localhost() {
+        let lan = loopback_redirect("http://192.168.1.50:20128/mcp/oauth/callback");
+        assert_eq!(lan.as_deref(), Some("http://localhost:20128/mcp/oauth/callback"));
+        assert_eq!(loopback_redirect("http://pi/cb").as_deref(), Some("http://localhost/cb"));
+        assert_eq!(loopback_redirect("https://pi.example.ts.net/cb"), None);
+        assert_eq!(loopback_redirect("http://localhost:20128/cb"), None);
+        assert_eq!(loopback_redirect("http://127.0.0.1:20128/cb"), None);
+    }
 
     #[test]
     fn parses_bearer_challenges() {

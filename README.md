@@ -224,7 +224,12 @@ claude mcp add --transport http zilong-router http://<router>:20128/mcp \
   settings) and signs in with an authorization code, PKCE and the `resource` parameter
   (RFC 8707). The authorization server sends the browser back to
   `<dashboard origin>/mcp/oauth/callback`, which finishes the sign-in; when that address
-  is not reachable from the browser, paste it into the dashboard instead. Tokens are
+  is not reachable from the browser, paste it into the dashboard instead. Many
+  authorization servers (Composio's among them) only register https or `localhost`
+  redirects, so when a dashboard on plain http (`http://pi:20128`) is refused, the router
+  registers `http://localhost:20128/mcp/oauth/callback` instead: that page won't load,
+  and you paste its address into the dashboard. Serving the dashboard over https (for
+  example `tailscale serve`) avoids the paste. Tokens are
   stored in the `kv` table (scope `mcpAuth`), never shown in the dashboard, and
   refreshed shortly before they expire or after a 401. When a refresh fails, agents are
   told to sign in again in the dashboard.

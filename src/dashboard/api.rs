@@ -963,6 +963,7 @@ fn mcp_server_json(state: &AppState, s: &ServerConfig) -> Value {
     v["toolCount"] = json!(cached.as_ref().map(|c| c.tools.len()));
     v["toolsFetchedAt"] = json!(cached.map(|c| c.fetched_at));
     v["stats"] = json!(state.mcp.stats(&s.id));
+    v["auth"] = mcp::auth::summary(&state.db, &s.id);
     v
 }
 
@@ -1033,6 +1034,39 @@ pub async fn mcp_tools(State(state): S, Path(id): Path<String>) -> R {
     mcp::server(&state.db, &id).ok_or_else(not_found)?;
     let c = mcp::cached_tools(&state.db, &id).unwrap_or_default();
     Ok(Json(json!({"tools": mcp_tool_rows(&c.tools), "fetchedAt": c.fetched_at})))
+}
+
+#[derive(Deserialize)]
+pub struct McpOauthStart {
+    /// The dashboard's origin as the browser sees it; the authorization server sends
+    /// the browser back to `{origin}/mcp/oauth/callback`.
+    origin: String,
+}
+
+/// Begins an OAuth sign-in to an MCP server: `{session, authUrl, redirectUri}`.
+pub async fn mcp_oauth_start(State(state): S, Path(id): Path<String>, Json(b): Json<McpOauthStart>) -> R {
+    let cfg = mcp::server(&state.db, &id).ok_or_else(not_found)?;
+    mcp::auth::start(&state, &cfg, &b.origin).await.map(Json).map_err(|e| bad(format!("{e:#}")))
+}
+
+/// Finishes a sign-in with the callback URL the user pasted (when the redirect could
+/// not reach the router).
+pub async fn mcp_oauth_exchange(State(state): S, Path(id): Path<String>, Json(b): Json<OauthStep>) -> R {
+    let (code, session) = mcp::auth::parse_callback(&b.callback);
+    if session.as_deref().is_some_and(|s| s != b.session) {
+        return Err(bad("this callback belongs to another sign-in; start again"));
+    }
+    mcp::auth::finish(&state, &b.session, &code, Some(&id)).await.map_err(|e| bad(format!("{e:#}")))?;
+    let cfg = mcp::server(&state.db, &id).ok_or_else(not_found)?;
+    Ok(Json(mcp_server_json(&state, &cfg)))
+}
+
+/// Signs out of an MCP server: drops its tokens and closes the connection.
+pub async fn mcp_oauth_sign_out(State(state): S, Path(id): Path<String>) -> R {
+    mcp::server(&state.db, &id).ok_or_else(not_found)?;
+    mcp::auth::forget(&state.db, &id)?;
+    state.mcp.stop(&id).await;
+    Ok(Json(json!({"ok": true})))
 }
 
 pub async fn mcp_stop(State(state): S, Path(id): Path<String>) -> R {

@@ -8,11 +8,12 @@
 pub mod api;
 pub mod import;
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::body::Body;
-use axum::extract::{ConnectInfo, Request, State};
+use axum::extract::{ConnectInfo, Query, Request, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -197,6 +198,9 @@ pub fn routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/mcp/servers/:id/refresh", post(api::mcp_refresh))
         .route("/mcp/servers/:id/stop", post(api::mcp_stop))
         .route("/mcp/servers/:id/tools", get(api::mcp_tools))
+        .route("/mcp/servers/:id/oauth", delete(api::mcp_oauth_sign_out))
+        .route("/mcp/servers/:id/oauth/start", post(api::mcp_oauth_start))
+        .route("/mcp/servers/:id/oauth/exchange", post(api::mcp_oauth_exchange))
         .route("/mcp/import", post(api::mcp_import))
         .route("/logout", post(api::logout))
         .route_layer(middleware::from_fn_with_state(state, guard))
@@ -212,6 +216,7 @@ pub fn routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/assets/style.css", get(style_css))
         .route("/api/info", get(info))
         .route("/callback", get(oauth_callback))
+        .route(crate::mcp::auth::CALLBACK_PATH, get(mcp_oauth_callback))
         .route("/providers/:file", get(provider_icon))
         .nest("/api/admin", admin)
 }
@@ -244,6 +249,45 @@ async fn info() -> impl IntoResponse {
         "openai_base_url": "/v1",
         "anthropic_base_url": "/v1",
     }))
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
+/// Where authorization servers send the browser back after signing in to an MCP
+/// server: finishes the sign-in and tells the dashboard tab that started it.
+async fn mcp_oauth_callback(State(state): State<Arc<AppState>>, Query(q): Query<HashMap<String, String>>) -> Response {
+    let result = match (q.get("error"), q.get("code"), q.get("state")) {
+        (Some(e), _, _) => Err(match q.get("error_description") {
+            Some(d) => format!("{e}: {d}"),
+            None => e.clone(),
+        }),
+        (None, Some(code), Some(session)) => {
+            crate::mcp::auth::finish(&state, session, code, None).await.map_err(|e| format!("{e:#}"))
+        }
+        _ => Err("the address has no authorization code".to_string()),
+    };
+    let (status, title, text, message) = match &result {
+        Ok(id) => (
+            StatusCode::OK,
+            "Signed in",
+            format!("Signed in to the MCP server `{id}`. You can close this tab."),
+            json!({"ok": true, "server": id}),
+        ),
+        Err(e) => (StatusCode::BAD_REQUEST, "Sign-in failed", e.clone(), json!({"ok": false, "error": e})),
+    };
+    // `<` escaped so the JSON cannot end the script element.
+    let message = message.to_string().replace('<', "\\u003c");
+    let html = format!(
+        r#"<!doctype html><meta charset="utf-8"><title>zilong-router: {title}</title>
+<body style="font:15px system-ui;margin:40px;max-width:640px">
+<h3>{title}</h3><p>{}</p><p><a href="/#/mcp">Back to the MCP Gateway page</a></p>
+<script>try {{ new BroadcastChannel('zilong-router-mcp-oauth').postMessage({message}); }} catch (e) {{}}</script>"#,
+        html_escape(&text)
+    );
+    (status, [(header::CONTENT_TYPE, "text/html; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], html)
+        .into_response()
 }
 
 #[cfg(test)]

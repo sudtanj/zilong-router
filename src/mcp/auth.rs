@@ -509,8 +509,7 @@ pub async fn start(state: &AppState, cfg: &ServerConfig, origin: &str) -> Result
         let reuse = load(&state.db, &cfg.id)
             .filter(|old| {
                 old.issuer == a.issuer
-                    && (old.registered_redirect == redirect_uri
-                        || loopback.as_ref() == Some(&old.registered_redirect))
+                    && (old.registered_redirect == redirect_uri || loopback.as_ref() == Some(&old.registered_redirect))
             })
             .filter(|old| !old.client_id.is_empty());
         match reuse {

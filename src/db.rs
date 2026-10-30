@@ -496,6 +496,17 @@ impl Db {
         })
     }
 
+    pub fn kv_get(&self, scope: &str, key: &str) -> Result<Option<Value>> {
+        self.with(|c| {
+            let v = c
+                .query_row("SELECT value FROM kv WHERE scope=?1 AND key=?2", params![scope, key], |r| {
+                    r.get::<_, Option<String>>(0)
+                })
+                .optional()?;
+            Ok(v.flatten().and_then(|s| serde_json::from_str(&s).ok()))
+        })
+    }
+
     pub fn kv_set(&self, scope: &str, key: &str, value: Option<&Value>) -> Result<()> {
         self.with(|c| match value {
             Some(v) => c.execute(

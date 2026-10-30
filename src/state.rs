@@ -28,6 +28,8 @@ pub struct AppState {
     pub model_cache: crate::discovery::Cache,
     /// Mirror health shown on the dashboard (see `turso::Status`).
     pub turso: Mutex<crate::turso::Status>,
+    /// Connections to the MCP servers behind `/mcp` (see `mcp`).
+    pub mcp: crate::mcp::Gateway,
     pub started_at: Instant,
 }
 
@@ -68,6 +70,7 @@ impl AppState {
             rr: Mutex::new(HashMap::new()),
             model_cache: Mutex::new(HashMap::new()),
             turso: Mutex::new(Default::default()),
+            mcp: Default::default(),
             started_at: Instant::now(),
         })
     }

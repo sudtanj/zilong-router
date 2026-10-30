@@ -13,6 +13,7 @@ mod db;
 mod discovery;
 mod executor;
 mod handlers;
+mod mcp;
 mod icons;
 mod model;
 mod oauth;
@@ -78,6 +79,7 @@ async fn run(cfg: Config) -> anyhow::Result<()> {
     }
 
     tokio::spawn(state::housekeeping(state.clone()));
+    tokio::spawn(mcp::reaper(state.clone()));
     if let Some(m) = &mirror {
         tokio::spawn(turso::sync_loop(state.clone(), m.clone()));
     }
@@ -88,6 +90,7 @@ async fn run(cfg: Config) -> anyhow::Result<()> {
     if let Some(m) = &mirror {
         turso::flush(&state, m).await;
     }
+    state.mcp.stop_all().await;
     state.db.checkpoint();
     tracing::info!("bye");
     Ok(())

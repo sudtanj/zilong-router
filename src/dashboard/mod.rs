@@ -192,6 +192,12 @@ pub fn routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/models/:prefix/hidden", get(api::hidden_models).delete(api::restore_hidden_models))
         .route("/refresh-models", post(api::refresh_models))
         .route("/usage/recent", get(api::usage_recent))
+        .route("/mcp/servers", get(api::mcp_servers).post(api::mcp_add))
+        .route("/mcp/servers/:id", patch(api::mcp_patch).delete(api::mcp_delete))
+        .route("/mcp/servers/:id/refresh", post(api::mcp_refresh))
+        .route("/mcp/servers/:id/stop", post(api::mcp_stop))
+        .route("/mcp/servers/:id/tools", get(api::mcp_tools))
+        .route("/mcp/import", post(api::mcp_import))
         .route("/logout", post(api::logout))
         .route_layer(middleware::from_fn_with_state(state, guard))
         // Added after the guard layer, so these two stay public.

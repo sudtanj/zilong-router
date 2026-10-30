@@ -207,29 +207,26 @@ claude mcp add --transport http zilong-router http://<router>:20128/mcp \
   "headers": {"Authorization": "Bearer <api-key>"}}}}
 ```
 
-- **Upstream servers**: stdio (a command with arguments, environment and working
-  directory) or Streamable HTTP (a URL plus headers for credentials; JSON and SSE answers
-  and `Mcp-Session-Id` sessions are handled, and an expired session is renewed). Add them
-  one by one or paste the `mcpServers` JSON from Claude Desktop, Cursor, Windsurf or VS
-  Code. Secret-looking environment variables and headers are masked in the dashboard.
-  The older HTTP+SSE transport (a `GET /sse` stream) is not supported.
-- **On demand**: a stdio server starts on its first call and stops after `MCP_IDLE_SECS`
-  (default 300; 0 keeps it running) without calls, so idle servers use no memory. Each
-  server's tool list is cached in the database, so `search_tools` does not start it; the
-  refresh button (or a `tools/list_changed` notification) reloads it.
+- **Upstream servers are remote only**: Streamable HTTP (one URL; JSON and SSE answers
+  and `Mcp-Session-Id` sessions are handled, and an expired session is renewed) or the
+  older HTTP+SSE transport (a `GET /sse` event stream that names the endpoint to POST
+  to), each with headers for credentials. The router never runs MCP server processes
+  (stdio `command` servers) on its own machine; run those elsewhere behind an HTTP
+  bridge such as `supergateway` or `mcp-proxy`. Add servers one by one or paste the
+  `mcpServers` JSON from Claude Desktop, Cursor, Windsurf or VS Code: entries with a URL
+  are imported (`"type": "sse"` or a URL ending in `/sse` means SSE), `command` entries
+  are reported and skipped. Secret-looking headers are masked in the dashboard.
+- **On demand**: a connection opens on the server's first call and closes after
+  `MCP_IDLE_SECS` (default 300; 0 keeps it open) without calls. Each server's tool list is
+  cached in the database, so `search_tools` does not connect; the refresh button (or a
+  `tools/list_changed` notification) reloads it.
 - **Access**: the API keys of `/v1`, with the same rules (loopback clients need no key
   unless `requireApiKey` is set). A restricted key reaches only the servers on its allow
   list as `mcp/<server id>`, or all of them with `mcp/*`.
 - **Observability**: the page shows each server's state, tool count, calls, errors, the
-  last error and the last lines of its stderr; every call is logged to the Console Log.
+  last error; every call is logged to the Console Log.
 - Server definitions live in the `kv` table (scopes `mcpServers` and `mcpTools`), so the
   Turso mirror carries them.
-- The Docker image is distroless: it has no `node`, `npx`, `python` or `uvx`, so stdio
-  servers need the binary install (or an image with those tools); HTTP servers work in
-  both.
-- Configuring a stdio server runs that command on the router's machine. Only people who
-  can log in to the dashboard can add one, so keep the dashboard password set when the
-  router is reachable from other machines.
 
 ## Dashboard
 
@@ -437,8 +434,8 @@ opens, and every sync interval (plus once on clean shutdown) pushes changes back
 
 Planned, roughly in order of interest. Nothing here is implemented yet.
 
-- MCP gateway: OAuth sign-in for upstream MCP servers that require it, the older
-  HTTP+SSE transport, and resources and prompts next to tools.
+- MCP gateway: OAuth sign-in for upstream MCP servers that require it, and resources and
+  prompts next to tools.
 - Gemini wire format (`/v1beta/models/...:generateContent`).
 - Model combos (one name that falls back through a list of provider/model pairs).
 - Embeddings, image and audio endpoints.

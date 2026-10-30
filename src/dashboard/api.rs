@@ -963,7 +963,6 @@ fn mcp_server_json(state: &AppState, s: &ServerConfig) -> Value {
     v["toolCount"] = json!(cached.as_ref().map(|c| c.tools.len()));
     v["toolsFetchedAt"] = json!(cached.map(|c| c.fetched_at));
     v["stats"] = json!(state.mcp.stats(&s.id));
-    v["stderr"] = json!(state.mcp.stderr_tail(&s.id));
     v
 }
 
@@ -1056,7 +1055,8 @@ pub async fn mcp_import(State(state): S, Json(b): Json<McpImport>) -> R {
         v => v,
     };
     let (mut added, mut skipped) = (Vec::new(), Vec::new());
-    for cfg in mcp::parse_import(&v).map_err(bad)? {
+    let (configs, rejected) = mcp::parse_import(&v).map_err(bad)?;
+    for cfg in configs {
         if mcp::server(&state.db, &cfg.id).is_some() {
             skipped.push(cfg.id);
         } else {
@@ -1064,5 +1064,5 @@ pub async fn mcp_import(State(state): S, Json(b): Json<McpImport>) -> R {
             added.push(cfg.id);
         }
     }
-    Ok(Json(json!({"added": added, "skipped": skipped})))
+    Ok(Json(json!({"added": added, "skipped": skipped, "rejected": rejected})))
 }

@@ -1,8 +1,9 @@
-//! Connections to upstream MCP servers: a child process speaking newline-delimited
-//! JSON-RPC on stdin/stdout, or a Streamable HTTP endpoint (JSON or SSE answers, with
-//! the `Mcp-Session-Id` the server hands out).
+//! Connections to upstream MCP servers, remote only: Streamable HTTP (JSON-RPC over
+//! POST, answers as JSON or SSE, with the `Mcp-Session-Id` the server hands out) and
+//! the older HTTP+SSE transport (a GET event stream that names a POST endpoint and
+//! carries the answers).
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,17 +12,16 @@ use anyhow::{anyhow, bail, Context, Result};
 use futures_util::StreamExt;
 use parking_lot::Mutex;
 use serde_json::{json, Value};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::oneshot;
 
 use super::{ServerConfig, Transport};
 
 /// What we ask for; servers answer with the version they speak.
 pub const PROTOCOL_VERSION: &str = "2025-06-18";
-/// `initialize` may have to wait for `npx`/`uvx` to download the server first.
+/// Remote servers may be slow to wake up (serverless cold starts).
 const INIT_TIMEOUT: Duration = Duration::from_secs(120);
-const STDERR_LINES: usize = 20;
+/// How long an SSE server may take to name its POST endpoint.
+const ENDPOINT_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn init_params() -> Value {
     json!({
@@ -64,204 +64,244 @@ fn answer_server_request(method: &str, id: &Value) -> Value {
     }
 }
 
+/// An HTTP error with the start of its body, for the dashboard.
+async fn http_error(resp: reqwest::Response) -> anyhow::Error {
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+    let body: String = body.chars().take(300).collect();
+    anyhow!("HTTP {status}: {}", body.trim())
+}
+
+fn is_event_stream(resp: &reqwest::Response) -> bool {
+    resp.headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|ct| ct.starts_with("text/event-stream"))
+}
+
 pub enum Client {
-    Stdio(Stdio),
     Http(Http),
+    Sse(Sse),
 }
 
 impl Client {
-    /// Starts (or opens a session with) the server and runs the `initialize` handshake.
+    /// Opens a session with the server and runs the `initialize` handshake.
     pub async fn connect(cfg: &ServerConfig, http: &reqwest::Client) -> Result<Client> {
         match cfg.transport {
-            Transport::Stdio => {
-                let c = Stdio::spawn(cfg)?;
-                c.request("initialize", init_params(), INIT_TIMEOUT).await.context("initialize")?;
-                c.notify("notifications/initialized").await?;
-                Ok(Client::Stdio(c))
-            }
             Transport::Http => {
                 let c = Http::new(cfg, http.clone());
                 c.handshake(INIT_TIMEOUT).await.context("initialize")?;
                 Ok(Client::Http(c))
+            }
+            Transport::Sse => {
+                let c = Sse::open(cfg, http.clone()).await?;
+                c.request("initialize", init_params(), INIT_TIMEOUT).await.context("initialize")?;
+                c.notify("notifications/initialized").await?;
+                Ok(Client::Sse(c))
             }
         }
     }
 
     pub async fn request(&self, method: &str, params: Value, timeout: Duration) -> Result<Value> {
         match self {
-            Client::Stdio(c) => c.request(method, params, timeout).await,
             Client::Http(c) => c.request(method, params, timeout).await,
+            Client::Sse(c) => c.request(method, params, timeout).await,
         }
     }
 
+    /// False once an SSE server closed its event stream (it is reopened on next use).
     pub fn alive(&self) -> bool {
         match self {
-            Client::Stdio(c) => c.alive.load(Ordering::Relaxed),
             Client::Http(_) => true,
+            Client::Sse(c) => c.alive.load(Ordering::Relaxed),
         }
     }
 
     /// True once after the server sent `notifications/tools/list_changed`.
     pub fn take_tools_changed(&self) -> bool {
         let flag = match self {
-            Client::Stdio(c) => &c.tools_changed,
             Client::Http(c) => &c.tools_changed,
+            Client::Sse(c) => &*c.tools_changed,
         };
         flag.swap(false, Ordering::Relaxed)
     }
-
-    /// The last lines a stdio server wrote to stderr (empty for HTTP).
-    pub fn stderr_tail(&self) -> Vec<String> {
-        match self {
-            Client::Stdio(c) => c.stderr.lock().iter().cloned().collect(),
-            Client::Http(_) => Vec::new(),
-        }
-    }
 }
 
-// ----- stdio ----------------------------------------------------------------------
+// ----- HTTP+SSE (protocol 2024-11-05) ---------------------------------------------
 
 type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Value>>>>;
 
-pub struct Stdio {
-    /// Killed when dropped (`kill_on_drop`).
-    _child: Child,
-    stdin: Arc<tokio::sync::Mutex<ChildStdin>>,
+/// Where to POST and with which headers; shared with the stream reader, which answers
+/// the server's own requests (pings) there.
+struct Poster {
+    http: reqwest::Client,
+    endpoint: String,
+    headers: Vec<(String, String)>,
+}
+
+impl Poster {
+    /// Sends one message. Answers arrive on the event stream; a server that puts one in
+    /// the POST body instead gets it returned here.
+    async fn post(&self, msg: &Value) -> Result<Option<Value>> {
+        let mut rb = self.http.post(&self.endpoint).header(reqwest::header::CONTENT_TYPE, "application/json");
+        for (k, v) in &self.headers {
+            rb = rb.header(k.as_str(), v.as_str());
+        }
+        let resp = rb.body(msg.to_string()).send().await?;
+        if !resp.status().is_success() {
+            return Err(http_error(resp).await);
+        }
+        let body = resp.text().await.unwrap_or_default();
+        let Some(id) = msg.get("id") else { return Ok(None) };
+        let Ok(v) = serde_json::from_str::<Value>(&body) else { return Ok(None) };
+        Ok(messages(v).into_iter().find(|m| m.get("id") == Some(id) && m.get("method").is_none()))
+    }
+}
+
+pub struct Sse {
+    poster: Arc<Poster>,
     pending: Pending,
     next_id: AtomicU64,
     alive: Arc<AtomicBool>,
     tools_changed: Arc<AtomicBool>,
-    stderr: Arc<Mutex<VecDeque<String>>>,
-    tasks: Vec<tokio::task::JoinHandle<()>>,
+    /// Reads the event stream; aborting it closes the connection.
+    reader: tokio::task::JoinHandle<()>,
 }
 
-impl Drop for Stdio {
+impl Drop for Sse {
     fn drop(&mut self) {
-        for t in &self.tasks {
-            t.abort();
-        }
+        self.reader.abort();
     }
 }
 
-async fn write_line(stdin: &tokio::sync::Mutex<ChildStdin>, msg: &Value) -> std::io::Result<()> {
-    let mut line = msg.to_string();
-    line.push('\n');
-    let mut w = stdin.lock().await;
-    w.write_all(line.as_bytes()).await?;
-    w.flush().await
-}
-
-impl Stdio {
-    fn spawn(cfg: &ServerConfig) -> Result<Stdio> {
-        let mut cmd = Command::new(&cfg.command);
-        cmd.args(&cfg.args)
-            .envs(&cfg.env)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true);
-        if !cfg.cwd.trim().is_empty() {
-            cmd.current_dir(cfg.cwd.trim());
+impl Sse {
+    /// Opens the event stream and waits for the `endpoint` event.
+    async fn open(cfg: &ServerConfig, http: reqwest::Client) -> Result<Sse> {
+        let url = reqwest::Url::parse(cfg.url.trim()).context("invalid URL")?;
+        let headers: Vec<(String, String)> = cfg.headers.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let mut rb = http.get(url.clone()).header(reqwest::header::ACCEPT, "text/event-stream");
+        for (k, v) in &headers {
+            rb = rb.header(k.as_str(), v.as_str());
         }
-        let mut child = cmd.spawn().with_context(|| format!("cannot start `{}`", cfg.command))?;
-        let stdin = Arc::new(tokio::sync::Mutex::new(child.stdin.take().ok_or_else(|| anyhow!("no stdin"))?));
-        let stdout = child.stdout.take().ok_or_else(|| anyhow!("no stdout"))?;
-        let stderr_pipe = child.stderr.take().ok_or_else(|| anyhow!("no stderr"))?;
+        let resp = tokio::time::timeout(INIT_TIMEOUT, rb.send())
+            .await
+            .map_err(|_| anyhow!("no answer within {} s", INIT_TIMEOUT.as_secs()))??;
+        if !resp.status().is_success() {
+            return Err(http_error(resp).await);
+        }
+        if !is_event_stream(&resp) {
+            bail!("not an SSE endpoint (no text/event-stream); try the Streamable HTTP transport");
+        }
 
         let pending: Pending = Arc::default();
         let alive = Arc::new(AtomicBool::new(true));
         let tools_changed = Arc::new(AtomicBool::new(false));
-        let stderr: Arc<Mutex<VecDeque<String>>> = Arc::default();
-
+        let (endpoint_tx, endpoint_rx) = oneshot::channel::<Arc<Poster>>();
         let reader = {
             let (pending, alive, changed) = (pending.clone(), alive.clone(), tools_changed.clone());
-            let stdin = stdin.clone();
+            let id = cfg.id.clone();
             tokio::spawn(async move {
-                let mut lines = BufReader::new(stdout).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    // Servers that log to stdout break the protocol; skip what isn't JSON.
-                    let Ok(v) = serde_json::from_str::<Value>(line.trim()) else { continue };
-                    for msg in messages(v) {
-                        let method = msg.get("method").and_then(Value::as_str).map(str::to_string);
-                        match (method.as_deref(), msg.get("id").cloned()) {
-                            (None, Some(id)) => {
-                                if let Some(tx) = id.as_u64().and_then(|n| pending.lock().remove(&n)) {
-                                    let _ = tx.send(msg);
+                let mut endpoint_tx = Some(endpoint_tx);
+                let mut poster: Option<Arc<Poster>> = None;
+                let mut parser = crate::sse::Parser::default();
+                let mut stream = resp.bytes_stream();
+                while let Some(Ok(chunk)) = stream.next().await {
+                    for ev in parser.push(&chunk) {
+                        if ev.event.as_deref() == Some("endpoint") {
+                            let Ok(endpoint) = url.join(ev.data.trim()) else {
+                                tracing::warn!("mcp {id}: bad endpoint {:?}", ev.data);
+                                continue;
+                            };
+                            let p = Arc::new(Poster {
+                                http: http.clone(),
+                                endpoint: endpoint.to_string(),
+                                headers: headers.clone(),
+                            });
+                            poster = Some(p.clone());
+                            if let Some(tx) = endpoint_tx.take() {
+                                let _ = tx.send(p);
+                            }
+                            continue;
+                        }
+                        if !matches!(ev.event.as_deref(), None | Some("message")) {
+                            continue;
+                        }
+                        let Ok(v) = serde_json::from_str::<Value>(ev.data.trim()) else { continue };
+                        for msg in messages(v) {
+                            let method = msg.get("method").and_then(Value::as_str).map(str::to_string);
+                            match (method.as_deref(), msg.get("id").cloned()) {
+                                (None, Some(id)) => {
+                                    if let Some(tx) = id.as_u64().and_then(|n| pending.lock().remove(&n)) {
+                                        let _ = tx.send(msg);
+                                    }
                                 }
+                                (Some(m), Some(id)) => {
+                                    if let Some(p) = poster.clone() {
+                                        let answer = answer_server_request(m, &id);
+                                        tokio::spawn(async move {
+                                            let _ = p.post(&answer).await;
+                                        });
+                                    }
+                                }
+                                (Some("notifications/tools/list_changed"), None) => {
+                                    changed.store(true, Ordering::Relaxed);
+                                }
+                                _ => {}
                             }
-                            (Some(m), Some(id)) => {
-                                let _ = write_line(&stdin, &answer_server_request(m, &id)).await;
-                            }
-                            (Some("notifications/tools/list_changed"), None) => changed.store(true, Ordering::Relaxed),
-                            _ => {}
                         }
                     }
                 }
                 alive.store(false, Ordering::Relaxed);
-                // Dropping the senders wakes every waiting request with "exited".
+                // Dropping the senders wakes every waiting request with "closed".
                 pending.lock().clear();
             })
         };
-        let stderr_task = {
-            let (buf, name) = (stderr.clone(), cfg.id.clone());
-            tokio::spawn(async move {
-                let mut lines = BufReader::new(stderr_pipe).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    tracing::debug!("mcp {name}: {line}");
-                    let mut b = buf.lock();
-                    b.push_back(line);
-                    if b.len() > STDERR_LINES {
-                        b.pop_front();
-                    }
-                }
-            })
+        let poster = match tokio::time::timeout(ENDPOINT_TIMEOUT, endpoint_rx).await {
+            Ok(Ok(p)) => p,
+            Ok(Err(_)) => {
+                reader.abort();
+                bail!("the event stream ended before naming its endpoint");
+            }
+            Err(_) => {
+                reader.abort();
+                bail!("no endpoint event within {} s", ENDPOINT_TIMEOUT.as_secs());
+            }
         };
-
-        Ok(Stdio {
-            _child: child,
-            stdin,
-            pending,
-            next_id: AtomicU64::new(1),
-            alive,
-            tools_changed,
-            stderr,
-            tasks: vec![reader, stderr_task],
-        })
-    }
-
-    fn exited(&self) -> anyhow::Error {
-        let tail: Vec<String> = self.stderr.lock().iter().rev().take(5).rev().cloned().collect();
-        if tail.is_empty() {
-            anyhow!("server process exited")
-        } else {
-            anyhow!("server process exited: {}", tail.join(" | "))
-        }
+        Ok(Sse { poster, pending, next_id: AtomicU64::new(1), alive, tools_changed, reader })
     }
 
     async fn notify(&self, method: &str) -> Result<()> {
-        write_line(&self.stdin, &json!({"jsonrpc": "2.0", "method": method})).await.map_err(|_| self.exited())
+        self.poster.post(&json!({"jsonrpc": "2.0", "method": method})).await.map(|_| ())
     }
 
     async fn request(&self, method: &str, params: Value, timeout: Duration) -> Result<Value> {
         if !self.alive.load(Ordering::Relaxed) {
-            return Err(self.exited());
+            bail!("the server closed the event stream");
         }
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
         self.pending.lock().insert(id, tx);
         let msg = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
-        if write_line(&self.stdin, &msg).await.is_err() {
-            self.pending.lock().remove(&id);
-            return Err(self.exited());
-        }
-        match tokio::time::timeout(timeout, rx).await {
-            Ok(Ok(resp)) => into_result(resp),
-            Ok(Err(_)) => Err(self.exited()),
+        let answer = async {
+            if let Some(resp) = self.poster.post(&msg).await? {
+                return Ok(resp);
+            }
+            rx.await.map_err(|_| anyhow!("the server closed the event stream"))
+        };
+        match tokio::time::timeout(timeout, answer).await {
+            Ok(Ok(resp)) => {
+                self.pending.lock().remove(&id);
+                into_result(resp)
+            }
+            Ok(Err(e)) => {
+                self.pending.lock().remove(&id);
+                Err(e)
+            }
             Err(_) => {
                 self.pending.lock().remove(&id);
                 let cancel = json!({"jsonrpc": "2.0", "method": "notifications/cancelled",
                     "params": {"requestId": id, "reason": "timeout"}});
-                let _ = write_line(&self.stdin, &cancel).await;
+                let _ = self.poster.post(&cancel).await;
                 bail!("no answer within {} s", timeout.as_secs())
             }
         }
@@ -379,19 +419,12 @@ impl Http {
             return Err(SessionExpired.into());
         }
         if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            let body: String = body.chars().take(300).collect();
-            bail!("HTTP {status}: {}", body.trim());
+            return Err(http_error(resp).await);
         }
         let Some(id) = msg.get("id") else { return Ok(None) };
         let is_answer = |m: &Value| m.get("id") == Some(id) && m.get("method").is_none();
 
-        let sse = resp
-            .headers()
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok())
-            .is_some_and(|ct| ct.starts_with("text/event-stream"));
-        if !sse {
+        if !is_event_stream(&resp) {
             let v: Value = resp.json().await.context("invalid JSON from the server")?;
             return messages(v).into_iter().find(is_answer).map(Some).ok_or_else(|| anyhow!("no answer in the reply"));
         }

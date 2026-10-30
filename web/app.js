@@ -566,27 +566,26 @@ pages.mcp = async () => {
           <p class="sm muted mb4">Add one, or paste the <code>mcpServers</code> JSON from Claude Desktop, Cursor or VS Code.</p>
           <div class="row gap2" style="justify-content:center">${buttons}</div></div>`
         : `<div class="col">${mcpCache.map(mcpRow).join('')}</div>`}
-      <p class="xs muted mt4">Stdio servers start on first use and ${idle}. Tool lists are cached, so searching does not start them; use ${ms('refresh', 14)} after a server gains tools. Calls and errors also go to the <a href="#/console-log">Console Log</a>.</p>
+      <p class="xs muted mt4">Remote servers only (Streamable HTTP or SSE): the router never runs server processes itself. Connections open on first use and ${idle}. Tool lists are cached, so searching does not connect; use ${ms('refresh', 14)} after a server gains tools. Calls and errors also go to the <a href="#/console-log">Console Log</a>.</p>
     </div>
   </div>`;
 };
 function mcpRow(s) {
-  const target = s.transport === 'http' ? s.url : [s.command, ...(s.args || [])].join(' ');
+  const target = s.url;
   const st = s.stats || {};
   const calls = st.calls ? ` · ${fmt(st.calls)} calls, ${fmt(st.errors)} errors, ${Math.round(st.totalMs / st.calls)} ms avg` : '';
   const tools = s.toolCount != null ? `<a href="#" data-act="mcpTools" data-id="${esc(s.id)}" style="color:var(--primary)">${s.toolCount} tools</a> · listed ${relTime(s.toolsFetchedAt).toLowerCase()}` : 'Tools not listed yet';
   return `<div class="keyrow ${s.enabled ? '' : 'off'}">
     <div class="grow" style="min-width:0">
-      <div class="row wrap" style="gap:8px"><p class="sm medium">${esc(s.name)}</p><code>${esc(s.id)}</code>${badge(s.transport === 'http' ? 'HTTP' : 'stdio', 'primary')}${mcpStatus(s)}</div>
+      <div class="row wrap" style="gap:8px"><p class="sm medium">${esc(s.name)}</p><code>${esc(s.id)}</code>${badge(s.transport === 'sse' ? 'SSE' : 'HTTP', 'primary')}${mcpStatus(s)}</div>
       <p class="xs muted mono mt1 truncate" title="${esc(target)}">${esc(target)}</p>
       ${s.description ? `<p class="xs muted mt1">${esc(s.description)}</p>` : ''}
       <p class="xs muted mt1">${tools}${calls}</p>
       ${st.lastError ? `<p class="xs danger mt1 break">${esc(st.lastError)}</p>` : ''}
-      ${s.stderr && s.stderr.length ? `<details class="mt1"><summary class="xs muted" style="cursor:pointer">stderr</summary><pre class="mcp-stderr">${esc(s.stderr.join('\n'))}</pre></details>` : ''}
     </div>
     <div class="row gap2 shrink0" style="padding-top:2px">
-      <button class="tiny" data-act="mcpRefresh" data-id="${esc(s.id)}" title="Restart and list tools">${ms('refresh', 18)}</button>
-      ${s.status === 'running' ? `<button class="tiny" data-act="mcpStop" data-id="${esc(s.id)}" title="Stop">${ms('stop_circle', 18)}</button>` : ''}
+      <button class="tiny" data-act="mcpRefresh" data-id="${esc(s.id)}" title="Reconnect and list tools">${ms('refresh', 18)}</button>
+      ${s.status === 'running' ? `<button class="tiny" data-act="mcpStop" data-id="${esc(s.id)}" title="Disconnect">${ms('stop_circle', 18)}</button>` : ''}
       <button class="tiny" data-act="mcpEdit" data-id="${esc(s.id)}" title="Edit">${ms('edit', 18)}</button>
       ${toggle(s.enabled, `data-act="mcpToggle" data-id="${esc(s.id)}" title="${s.enabled ? 'Disable' : 'Enable'}"`, 'sm')}
       <button class="tiny red del" data-act="mcpDelete" data-id="${esc(s.id)}" style="padding:8px">${ms('delete', 18)}</button>
@@ -598,31 +597,21 @@ const linesToMap = (text, sep) => Object.fromEntries(text.split('\n').map((l) =>
 const mapToLines = (o, sep) => Object.entries(o || {}).map(([k, v]) => k + sep + v).join('\n');
 function mcpForm(s) {
   const edit = !!s;
-  s = s || {transport: 'stdio', args: [], env: {}, headers: {}};
+  s = s || {transport: 'http', headers: {}};
   const {form} = openModal({
     title: edit ? `Edit ${s.name}` : 'Add MCP server',
     body: `<div class="row gap2" style="align-items:flex-start"><div class="grow">${field('name', 'Name', {value: s.name, placeholder: 'GitHub', required: true})}</div>
         <div class="grow">${field('sid', 'Id', {value: s.id, placeholder: 'github', mono: true, hint: edit ? 'Cannot be changed.' : 'a-z, 0-9 and -. Tools are named <code>id__tool</code>.'})}</div></div>
       ${field('description', 'Description', {value: s.description, placeholder: 'Issues, pull requests and code search', hint: 'Shown to agents by <code>list_servers</code>, so they know what the server is for.'})}
-      ${field('transport', 'Transport', {type: 'select', value: s.transport, options: [{value: 'stdio', label: 'stdio: run a command'}, {value: 'http', label: 'Streamable HTTP: a URL'}]})}
-      <div data-tr="stdio">
-        ${field('command', 'Command', {value: s.command, placeholder: 'npx', mono: true})}
-        ${field('args', 'Arguments (one per line)', {type: 'textarea', rows: 3, value: (s.args || []).join('\n'), placeholder: '-y\n@modelcontextprotocol/server-github'})}
-        ${field('env', 'Environment (KEY=value, one per line)', {type: 'textarea', rows: 3, value: mapToLines(s.env, '='), placeholder: 'GITHUB_PERSONAL_ACCESS_TOKEN=ghp_…'})}
-        ${field('cwd', 'Working directory', {value: s.cwd, placeholder: 'optional', mono: true})}
-      </div>
-      <div data-tr="http">
-        ${field('url', 'URL', {value: s.url, placeholder: 'https://example.com/mcp', mono: true})}
-        ${field('headers', 'Headers (Name: value, one per line)', {type: 'textarea', rows: 3, value: mapToLines(s.headers, ': '), placeholder: 'Authorization: Bearer …'})}
-      </div>
+      ${field('transport', 'Transport', {type: 'select', value: s.transport, options: [{value: 'http', label: 'Streamable HTTP (one URL, usually …/mcp)'}, {value: 'sse', label: 'SSE (older servers, usually …/sse)'}]})}
+      ${field('url', 'URL', {value: s.url, placeholder: 'https://example.com/mcp', mono: true, required: true})}
+      ${field('headers', 'Headers (Name: value, one per line)', {type: 'textarea', rows: 3, value: mapToLines(s.headers, ': '), placeholder: 'Authorization: Bearer …'})}
       ${field('timeoutSecs', 'Call timeout in seconds', {type: 'number', min: 0, value: s.timeoutSecs || '', placeholder: '120'})}
-      ${edit ? '<p class="hint mb4">Values of secret-looking variables and headers show as ••••••••; leave them as they are to keep them.</p>' : ''}
+      ${edit ? '<p class="hint mb4">Values of secret-looking headers show as ••••••••; leave them as they are to keep them.</p>' : ''}
       ${twoButtons(edit ? 'Save' : 'Add server')}`,
     onSubmit: async (f) => {
       const body = {
         name: f.name.value.trim(), description: f.description.value.trim(), transport: f.transport.value,
-        command: f.command.value.trim(), args: f.args.value.split('\n').map((l) => l.trim()).filter(Boolean),
-        env: linesToMap(f.env.value, '='), cwd: f.cwd.value.trim(),
         url: f.url.value.trim(), headers: linesToMap(f.headers.value, ':'), timeoutSecs: Number(f.timeoutSecs.value) || 0,
       };
       if (edit) await patch(mcpPath(s.id), body);
@@ -631,8 +620,6 @@ function mcpForm(s) {
       reload();
     },
   });
-  const sync = () => $$('[data-tr]', form).forEach((el) => el.classList.toggle('hidden', el.dataset.tr !== form.transport.value));
-  form.transport.onchange = sync; sync();
   if (edit) form.sid.readOnly = true;
   else {
     form.sid.oninput = () => (form.sid.dataset.touched = '1');
@@ -669,12 +656,13 @@ actions.mcpRefresh = async ({id}, b) => {
 actions.mcpImport = () => openModal({
   title: 'Import MCP servers', size: 'wide',
   body: field('config', 'mcpServers JSON', {type: 'textarea', rows: 12,
-      placeholder: '{\n  "mcpServers": {\n    "github": {\n      "command": "npx",\n      "args": ["-y", "@modelcontextprotocol/server-github"],\n      "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_…"}\n    },\n    "remote": {"url": "https://example.com/mcp", "headers": {"Authorization": "Bearer …"}}\n  }\n}',
-      hint: 'As written by Claude Desktop (<code>claude_desktop_config.json</code>), Cursor (<code>~/.cursor/mcp.json</code>), Windsurf or VS Code (<code>servers</code>). Servers whose id already exists are skipped.'})
+      placeholder: '{\n  "mcpServers": {\n    "github": {\n      "type": "http",\n      "url": "https://api.githubcopilot.com/mcp/",\n      "headers": {"Authorization": "Bearer ghp_…"}\n    },\n    "legacy": {"type": "sse", "url": "https://example.com/sse"}\n  }\n}',
+      hint: 'As written by Claude Desktop (<code>claude_desktop_config.json</code>), Cursor (<code>~/.cursor/mcp.json</code>), Windsurf or VS Code (<code>servers</code>). Only servers with a URL are imported; local <code>command</code> servers are not supported. Servers whose id already exists are skipped.'})
     + twoButtons('Import'),
   onSubmit: async (f) => {
     const r = await post('/mcp/import', {config: f.config.value});
-    notify('success', `Added ${r.added.length} server(s)${r.skipped.length ? `; skipped existing: ${r.skipped.join(', ')}` : ''}`);
+    const rejected = r.rejected || [];
+    notify(rejected.length && !r.added.length ? 'error' : 'success', `Added ${r.added.length} server(s)${r.skipped.length ? `; skipped existing: ${r.skipped.join(', ')}` : ''}${rejected.length ? `; not imported: ${rejected.join('; ')}` : ''}`);
     reload();
   },
 });

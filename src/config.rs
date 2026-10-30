@@ -97,8 +97,8 @@ pub struct Config {
     #[arg(long, env = "TURSO_SYNC_SECS", default_value_t = 60)]
     pub turso_sync_secs: u64,
 
-    /// Stop an MCP server's process (or drop its HTTP session) after this many idle
-    /// seconds; 0 keeps them running.
+    /// Close the connection to an upstream MCP server after this many idle seconds; 0
+    /// keeps connections open.
     #[arg(long, env = "MCP_IDLE_SECS", default_value_t = 300)]
     pub mcp_idle_secs: u64,
 

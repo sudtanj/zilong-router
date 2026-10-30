@@ -1,9 +1,10 @@
 //! End-to-end checks for the MCP gateway: the real `zilong-router` binary in front of a
 //! mock Streamable HTTP MCP server (sessions, paginated tool lists, SSE answers, an
-//! upstream auth header) and a small stdio server (`tests/fixtures/mcp_stdio.py`, skipped
-//! when `python3` is missing).
+//! upstream auth header) and a mock server on the older HTTP+SSE transport (an event
+//! stream naming a POST endpoint, answers on the stream).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::convert::Infallible;
 use std::net::TcpListener as StdListener;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -11,26 +12,21 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use axum::extract::State;
+use axum::body::Body;
+use axum::extract::{Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::{Json, Router};
+use futures_util::StreamExt;
 use serde_json::{json, Value};
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
-const STDIO_SERVER: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/mcp_stdio.py");
 const UPSTREAM_AUTH: &str = "Bearer up-secret";
 
-fn python() -> bool {
-    Command::new("python3").arg("--version").output().is_ok_and(|o| o.status.success())
-}
-
-// ----- mock Streamable HTTP server ---------------------------------------------------
-
-#[derive(Clone, Default)]
-struct Upstream {
-    sessions: Arc<Mutex<HashSet<String>>>,
-    inits: Arc<AtomicUsize>,
+fn authorized(headers: &HeaderMap) -> bool {
+    headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()) == Some(UPSTREAM_AUTH)
 }
 
 fn tool(name: &str, description: &str, schema: Value) -> Value {
@@ -41,27 +37,10 @@ fn text(t: impl Into<String>) -> Value {
     json!({"content": [{"type": "text", "text": t.into()}]})
 }
 
-async fn upstream_mcp(State(u): State<Upstream>, headers: HeaderMap, Json(msg): Json<Value>) -> Response {
-    if headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()) != Some(UPSTREAM_AUTH) {
-        return (StatusCode::UNAUTHORIZED, "bad upstream credentials").into_response();
-    }
-    let method = msg["method"].as_str().unwrap_or_default();
-    let id = msg["id"].clone();
-    if method == "initialize" {
-        let sid = format!("s{}", u.inits.fetch_add(1, Ordering::SeqCst) + 1);
-        u.sessions.lock().unwrap().insert(sid.clone());
-        let result = json!({"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
-            "serverInfo": {"name": "mock", "version": "1"}});
-        return ([("mcp-session-id", sid)], Json(json!({"jsonrpc": "2.0", "id": id, "result": result}))).into_response();
-    }
-    let sid = headers.get("mcp-session-id").and_then(|v| v.to_str().ok()).unwrap_or_default();
-    if !u.sessions.lock().unwrap().contains(sid) {
-        return (StatusCode::NOT_FOUND, "unknown session").into_response();
-    }
-    if id.is_null() {
-        return StatusCode::ACCEPTED.into_response();
-    }
-    let result = match method {
+/// What both mock servers answer to a request after `initialize`: the result, or the
+/// JSON-RPC error. `echo` puts `prefix` before the text, so tests can tell them apart.
+fn answer(msg: &Value, prefix: &str) -> Result<Value, Value> {
+    let result = match msg["method"].as_str().unwrap_or_default() {
         // Two pages, to check that the gateway follows nextCursor.
         "tools/list" if msg["params"]["cursor"] == "p2" => {
             json!({"tools": [tool("fail", "Always fails", json!({"type": "object"}))]})
@@ -76,17 +55,52 @@ async fn upstream_mcp(State(u): State<Upstream>, headers: HeaderMap, Json(msg): 
         "tools/call" => {
             let args = &msg["params"]["arguments"];
             match msg["params"]["name"].as_str() {
-                Some("echo") => text(args["text"].as_str().unwrap_or_default()),
+                Some("echo") => text(format!("{prefix}{}", args["text"].as_str().unwrap_or_default())),
                 Some("add") => text((args["a"].as_f64().unwrap() + args["b"].as_f64().unwrap()).to_string()),
                 _ => json!({"content": [{"type": "text", "text": "it broke"}], "isError": true}),
             }
         }
-        _ => {
-            let error = json!({"code": -32601, "message": "method not found"});
-            return Json(json!({"jsonrpc": "2.0", "id": id, "error": error})).into_response();
-        }
+        _ => return Err(json!({"code": -32601, "message": "method not found"})),
     };
-    let body = json!({"jsonrpc": "2.0", "id": id, "result": result});
+    Ok(result)
+}
+
+fn response(id: &Value, answer: Result<Value, Value>) -> Value {
+    match answer {
+        Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
+        Err(error) => json!({"jsonrpc": "2.0", "id": id, "error": error}),
+    }
+}
+
+// ----- mock Streamable HTTP server ---------------------------------------------------
+
+#[derive(Clone, Default)]
+struct Upstream {
+    sessions: Arc<Mutex<HashSet<String>>>,
+    inits: Arc<AtomicUsize>,
+}
+
+async fn upstream_mcp(State(u): State<Upstream>, headers: HeaderMap, Json(msg): Json<Value>) -> Response {
+    if !authorized(&headers) {
+        return (StatusCode::UNAUTHORIZED, "bad upstream credentials").into_response();
+    }
+    let method = msg["method"].as_str().unwrap_or_default();
+    let id = msg["id"].clone();
+    if method == "initialize" {
+        let sid = format!("s{}", u.inits.fetch_add(1, Ordering::SeqCst) + 1);
+        u.sessions.lock().unwrap().insert(sid.clone());
+        let result = json!({"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
+            "serverInfo": {"name": "mock", "version": "1"}});
+        return ([("mcp-session-id", sid)], Json(response(&id, Ok(result)))).into_response();
+    }
+    let sid = headers.get("mcp-session-id").and_then(|v| v.to_str().ok()).unwrap_or_default();
+    if !u.sessions.lock().unwrap().contains(sid) {
+        return (StatusCode::NOT_FOUND, "unknown session").into_response();
+    }
+    if id.is_null() {
+        return StatusCode::ACCEPTED.into_response();
+    }
+    let body = response(&id, answer(&msg, ""));
     if method == "tools/call" {
         // Tool results come back as an event stream, the other answers as plain JSON.
         ([(header::CONTENT_TYPE, "text/event-stream")], format!("event: message\ndata: {body}\n\n")).into_response()
@@ -103,6 +117,75 @@ async fn upstream_reset(State(u): State<Upstream>) -> StatusCode {
 
 async fn start_upstream(u: Upstream) -> String {
     let app = Router::new().route("/mcp", post(upstream_mcp)).route("/reset", post(upstream_reset)).with_state(u);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    url
+}
+
+// ----- mock HTTP+SSE server ----------------------------------------------------------
+
+#[derive(Clone, Default)]
+struct SseUpstream {
+    /// Open event streams by session id.
+    streams: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<String>>>>,
+    opened: Arc<AtomicUsize>,
+}
+
+/// `GET /sse`: an event stream that first names the endpoint to POST messages to.
+async fn sse_open(State(u): State<SseUpstream>, headers: HeaderMap) -> Response {
+    if !authorized(&headers) {
+        return (StatusCode::UNAUTHORIZED, "bad upstream credentials").into_response();
+    }
+    let sid = format!("e{}", u.opened.fetch_add(1, Ordering::SeqCst) + 1);
+    let (tx, rx) = mpsc::unbounded_channel::<String>();
+    tx.send(format!("event: endpoint\ndata: /messages?sessionId={sid}\n\n")).unwrap();
+    u.streams.lock().unwrap().insert(sid, tx);
+    let body = Body::from_stream(UnboundedReceiverStream::new(rx).map(Ok::<_, Infallible>));
+    ([(header::CONTENT_TYPE, "text/event-stream")], body).into_response()
+}
+
+/// `POST /messages?sessionId=…`: accepted at once, answered on the session's stream.
+async fn sse_message(
+    State(u): State<SseUpstream>,
+    Query(q): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+    Json(msg): Json<Value>,
+) -> Response {
+    if !authorized(&headers) {
+        return (StatusCode::UNAUTHORIZED, "bad upstream credentials").into_response();
+    }
+    let sid = q.get("sessionId").cloned().unwrap_or_default();
+    let Some(tx) = u.streams.lock().unwrap().get(&sid).cloned() else {
+        return (StatusCode::NOT_FOUND, "unknown session").into_response();
+    };
+    let id = msg["id"].clone();
+    if !id.is_null() {
+        let body = match msg["method"].as_str() {
+            Some("initialize") => {
+                let result = json!({"protocolVersion": "2024-11-05", "capabilities": {"tools": {}},
+                    "serverInfo": {"name": "mock-sse", "version": "1"}});
+                response(&id, Ok(result))
+            }
+            _ => response(&id, answer(&msg, "sse: ")),
+        };
+        let _ = tx.send(format!("event: message\ndata: {body}\n\n"));
+    }
+    (StatusCode::ACCEPTED, "Accepted").into_response()
+}
+
+/// Close every event stream, as a restarted server would.
+async fn sse_reset(State(u): State<SseUpstream>) -> StatusCode {
+    u.streams.lock().unwrap().clear();
+    StatusCode::OK
+}
+
+async fn start_sse_upstream(u: SseUpstream) -> String {
+    let app = Router::new()
+        .route("/sse", get(sse_open))
+        .route("/messages", post(sse_message))
+        .route("/reset", post(sse_reset))
+        .with_state(u);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -188,6 +271,12 @@ async fn http_server(base: &str, id: &str, upstream: &str) {
     add_server(base, server).await;
 }
 
+async fn sse_server(base: &str, id: &str, upstream: &str) {
+    let server = json!({"id": id, "transport": "sse", "url": format!("{upstream}/sse"),
+        "headers": {"Authorization": UPSTREAM_AUTH}, "description": "mock legacy tools"});
+    add_server(base, server).await;
+}
+
 async fn server_status(base: &str, id: &str) -> Value {
     let list = admin(reqwest::Method::GET, base, "/mcp/servers", None).await;
     list["servers"].as_array().unwrap().iter().find(|s| s["id"] == id).unwrap().clone()
@@ -233,17 +322,14 @@ fn tool_names(search: &Value) -> Vec<String> {
 // ----- tests -----------------------------------------------------------------------------
 
 #[tokio::test]
-async fn meta_tools_reach_http_and_stdio_servers() {
+async fn meta_tools_reach_http_and_sse_servers() {
     let upstream = Upstream::default();
     let up = start_upstream(upstream.clone()).await;
+    let sse_up = start_sse_upstream(SseUpstream::default()).await;
     let router = start_router("meta", 300).await;
     let base = router.base.as_str();
     http_server(base, "web", &up).await;
-    let stdio = python();
-    if stdio {
-        let server = json!({"id": "local", "command": "python3", "args": [STDIO_SERVER], "env": {"GREETING": "hi"}});
-        add_server(base, server).await;
-    }
+    sse_server(base, "legacy", &sse_up).await;
 
     let hello = json!({"protocolVersion": "2025-03-26", "capabilities": {}});
     let init = rpc(base, "/mcp", None, "initialize", hello).await;
@@ -254,14 +340,14 @@ async fn meta_tools_reach_http_and_stdio_servers() {
         list["result"]["tools"].as_array().unwrap().iter().filter_map(|t| t["name"].as_str()).collect();
     assert_eq!(names, ["search_tools", "get_tool_schemas", "call_tool", "list_servers"]);
 
-    // Search: both pages of the HTTP server's tools, and the stdio server's.
+    // Search: both pages of each server's tools.
     let all = parsed(&call(base, "/mcp", None, "search_tools", json!({"query": "", "limit": 50})).await);
     let found = tool_names(&all);
-    for t in ["web__echo", "web__add", "web__fail"] {
+    for t in ["web__echo", "web__add", "web__fail", "legacy__echo", "legacy__fail"] {
         assert!(found.contains(&t.to_string()), "{t} missing: {all}");
     }
-    assert_eq!(found.contains(&"local__echo".to_string()), stdio, "{all}");
-    let best = parsed(&call(base, "/mcp", None, "search_tools", json!({"query": "add numbers"})).await);
+    let query = json!({"query": "add numbers", "server": "web"});
+    let best = parsed(&call(base, "/mcp", None, "search_tools", query).await);
     assert_eq!(tool_names(&best)[0], "web__add");
     assert_eq!(best["results"][0]["parameters"], "a: number, b: number");
 
@@ -279,17 +365,13 @@ async fn meta_tools_reach_http_and_stdio_servers() {
     let r = run(base, None, "nope__x", Value::Null).await;
     assert_eq!(r["isError"], true);
     assert!(first_text(&r).contains("unknown tool"), "{r}");
-    if stdio {
-        let r = run(base, None, "local__echo", json!({"text": "yo"})).await;
-        assert_eq!(first_text(&r), "hi yo");
-        // `echo` alone is ambiguous with two servers having it.
-        let r = run(base, None, "echo", json!({"text": "x"})).await;
-        assert!(first_text(&r).contains("several servers"), "{r}");
-    } else {
-        // With one server, a bare tool name is enough.
-        let r = run(base, None, "echo", json!({"text": "x"})).await;
-        assert_eq!(first_text(&r), "x");
-    }
+    let r = run(base, None, "legacy__echo", json!({"text": "yo"})).await;
+    assert_eq!(first_text(&r), "sse: yo");
+    let r = run(base, None, "legacy__add", json!({"a": 20, "b": 22})).await;
+    assert_eq!(first_text(&r), "42");
+    // `echo` alone is ambiguous with two servers having it.
+    let r = run(base, None, "echo", json!({"text": "x"})).await;
+    assert!(first_text(&r).contains("several servers"), "{r}");
 
     // The upstream forgot its session: the gateway starts a new one and retries.
     let inits = upstream.inits.load(Ordering::SeqCst);
@@ -302,7 +384,7 @@ async fn meta_tools_reach_http_and_stdio_servers() {
     let flat = rpc(base, "/mcp/all", None, "tools/list", json!({})).await;
     let flat_names: Vec<&str> =
         flat["result"]["tools"].as_array().unwrap().iter().filter_map(|t| t["name"].as_str()).collect();
-    assert!(flat_names.contains(&"web__add"), "{flat_names:?}");
+    assert!(flat_names.contains(&"web__add") && flat_names.contains(&"legacy__add"), "{flat_names:?}");
     let r = call(base, "/mcp/all", None, "web__add", json!({"a": 4, "b": 5})).await;
     assert_eq!(first_text(&r), "9");
     let unknown = rpc(base, "/mcp/all", None, "tools/call", json!({"name": "web_add"})).await;
@@ -315,6 +397,7 @@ async fn meta_tools_reach_http_and_stdio_servers() {
     assert!(web["stats"]["calls"].as_u64().unwrap() >= 5, "{web}");
     let tools = admin(reqwest::Method::GET, base, "/mcp/servers/web/tools", None).await;
     assert_eq!(tools["tools"].as_array().unwrap().len(), 3);
+    assert_eq!(server_status(base, "legacy").await["transport"], "sse");
 
     // Saving the form with the masked value keeps the stored header.
     let patch = json!({"description": "renamed", "headers": {"Authorization": "••••••••"}});
@@ -360,31 +443,59 @@ async fn restricted_keys_see_only_their_servers() {
 }
 
 #[tokio::test]
-async fn stdio_servers_stop_when_idle_and_restart_on_use() {
-    if !python() {
-        eprintln!("python3 not found; skipping the stdio lifecycle test");
-        return;
-    }
+async fn sse_connections_close_when_idle_and_reopen_on_use() {
+    let sse = SseUpstream::default();
+    let sse_up = start_sse_upstream(sse.clone()).await;
     let router = start_router("idle", 1).await;
     let base = router.base.as_str();
-    let server = json!({"id": "local", "command": "python3", "args": [STDIO_SERVER], "env": {"GREETING": "hey"}});
-    add_server(base, server).await;
+    sse_server(base, "legacy", &sse_up).await;
 
-    let r = run(base, None, "local__echo", json!({"text": "1"})).await;
-    assert_eq!(first_text(&r), "hey 1");
-    let s = server_status(base, "local").await;
-    assert_eq!(s["status"], "running", "{s}");
-    assert!(s["stderr"].as_array().unwrap().iter().any(|l| l == "mock stdio server starting"), "{s}");
+    let r = run(base, None, "legacy__echo", json!({"text": "1"})).await;
+    assert_eq!(first_text(&r), "sse: 1");
+    assert_eq!(server_status(base, "legacy").await["status"], "running");
+    assert_eq!(sse.opened.load(Ordering::SeqCst), 1);
 
     tokio::time::sleep(Duration::from_millis(3500)).await;
-    assert_eq!(server_status(base, "local").await["status"], "stopped");
+    assert_eq!(server_status(base, "legacy").await["status"], "stopped");
+    let r = run(base, None, "legacy__echo", json!({"text": "2"})).await;
+    assert_eq!(first_text(&r), "sse: 2");
+    assert_eq!(sse.opened.load(Ordering::SeqCst), 2);
 
-    let r = run(base, None, "local__echo", json!({"text": "2"})).await;
-    assert_eq!(first_text(&r), "hey 2");
+    // The server closed its stream (a restart): the next call opens a new one.
+    reqwest::Client::new().post(format!("{sse_up}/reset")).send().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let r = run(base, None, "legacy__echo", json!({"text": "3"})).await;
+    assert_eq!(first_text(&r), "sse: 3");
+    assert_eq!(sse.opened.load(Ordering::SeqCst), 3);
 
-    // A server that cannot start reports why.
-    add_server(base, json!({"id": "broken", "command": "/nonexistent/mcp-server"})).await;
+    // A server that cannot be reached reports why.
+    add_server(base, json!({"id": "broken", "transport": "sse", "url": "http://127.0.0.1:9/sse"})).await;
     let r = run(base, None, "broken__x", Value::Null).await;
-    assert_eq!(r["isError"], true);
-    assert!(first_text(&r).contains("cannot start"), "{r}");
+    assert_eq!(r["isError"], true, "{r}");
+    assert!(server_status(base, "broken").await["stats"]["lastError"].is_string());
+}
+
+#[tokio::test]
+async fn only_remote_servers_are_accepted() {
+    let router = start_router("remote-only", 300).await;
+    let base = router.base.as_str();
+    let http = reqwest::Client::new();
+    for server in [
+        json!({"id": "local", "command": "npx", "args": ["-y", "some-mcp-server"]}),
+        json!({"id": "local", "transport": "stdio", "command": "npx"}),
+        json!({"id": "local", "url": "file:///tmp/server"}),
+    ] {
+        let resp = http.post(format!("{base}/api/admin/mcp/servers")).json(&server).send().await.unwrap();
+        assert!(resp.status().is_client_error(), "{server}: {}", resp.status());
+    }
+
+    let config = json!({"mcpServers": {
+        "files": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/"]},
+        "remote": {"type": "sse", "url": "https://example.com/sse"},
+    }});
+    let r = admin(reqwest::Method::POST, base, "/mcp/import", Some(json!({"config": config}))).await;
+    assert_eq!(r["added"], json!(["remote"]));
+    assert_eq!(r["rejected"].as_array().unwrap().len(), 1, "{r}");
+    let list = admin(reqwest::Method::GET, base, "/mcp/servers", None).await;
+    assert_eq!(list["servers"].as_array().unwrap().len(), 1);
 }

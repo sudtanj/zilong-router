@@ -3,10 +3,13 @@
 //! every server, read a tool's schema, call it) instead of hundreds of tool
 //! definitions; `/mcp/all` lists every tool directly as `<server>__<tool>`.
 //!
+//! Only remote servers are supported (Streamable HTTP and the older HTTP+SSE
+//! transport): the router never runs server processes on its own machine.
+//!
 //! Server definitions live in the `kv` table (scope `mcpServers`, so the Turso mirror
 //! carries them) and each server's tool list is cached under `mcpTools`, so searching
-//! does not start idle servers. Stdio servers are started on first use and stopped
-//! after `MCP_IDLE_SECS` without calls.
+//! does not open connections. Connections are opened on first use and closed after
+//! `MCP_IDLE_SECS` without calls.
 
 pub mod client;
 pub mod server;
@@ -31,15 +34,17 @@ const TOOLS_SCOPE: &str = "mcpTools";
 /// cannot contain `_`, so the first `__` always ends the server id.
 pub const SEP: &str = "__";
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
-/// Shown instead of secret env/header values; sending it back keeps the stored value.
+/// Shown instead of secret header values; sending it back keeps the stored value.
 pub const MASK: &str = "••••••••";
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Transport {
+    /// Streamable HTTP: one URL, JSON-RPC over POST, answers as JSON or SSE.
     #[default]
-    Stdio,
     Http,
+    /// The older HTTP+SSE transport: a GET event stream that names a POST endpoint.
+    Sse,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -50,10 +55,6 @@ pub struct ServerConfig {
     /// What the server is for; shown to agents by `list_servers`.
     pub description: String,
     pub transport: Transport,
-    pub command: String,
-    pub args: Vec<String>,
-    pub env: BTreeMap<String, String>,
-    pub cwd: String,
     pub url: String,
     pub headers: BTreeMap<String, String>,
     pub enabled: bool,
@@ -67,11 +68,7 @@ impl Default for ServerConfig {
             id: String::new(),
             name: String::new(),
             description: String::new(),
-            transport: Transport::Stdio,
-            command: String::new(),
-            args: Vec::new(),
-            env: BTreeMap::new(),
-            cwd: String::new(),
+            transport: Transport::Http,
             url: String::new(),
             headers: BTreeMap::new(),
             enabled: true,
@@ -122,28 +119,20 @@ impl ServerConfig {
         if self.name.is_empty() {
             self.name = self.id.clone();
         }
-        self.command = self.command.trim().to_string();
         self.url = self.url.trim().to_string();
-        self.args.retain(|a| !a.is_empty());
-        self.env.retain(|k, _| !k.trim().is_empty());
         self.headers.retain(|k, _| !k.trim().is_empty());
-        match self.transport {
-            Transport::Stdio if self.command.is_empty() => Err("a command is required for a stdio server".into()),
-            Transport::Http if !(self.url.starts_with("http://") || self.url.starts_with("https://")) => {
-                Err("the URL must start with http:// or https://".into())
-            }
-            _ => Ok(()),
+        if !(self.url.starts_with("http://") || self.url.starts_with("https://")) {
+            return Err("the URL must start with http:// or https://".into());
         }
+        Ok(())
     }
 
-    /// Copy for the dashboard with secret-looking env and header values hidden.
+    /// Copy for the dashboard with secret-looking header values hidden.
     pub fn masked(&self) -> ServerConfig {
         let mut c = self.clone();
-        for map in [&mut c.env, &mut c.headers] {
-            for (k, v) in map.iter_mut() {
-                if is_secret(k) && !v.is_empty() {
-                    *v = MASK.to_string();
-                }
+        for (k, v) in c.headers.iter_mut() {
+            if is_secret(k) && !v.is_empty() {
+                *v = MASK.to_string();
             }
         }
         c
@@ -151,19 +140,16 @@ impl ServerConfig {
 
     /// Puts back the stored values the dashboard sent as [`MASK`].
     pub fn unmask(&mut self, old: &ServerConfig) {
-        for (map, old_map) in [(&mut self.env, &old.env), (&mut self.headers, &old.headers)] {
-            for (k, v) in map.iter_mut() {
-                if v == MASK {
-                    *v = old_map.get(k).cloned().unwrap_or_default();
-                }
+        for (k, v) in self.headers.iter_mut() {
+            if v == MASK {
+                *v = old.headers.get(k).cloned().unwrap_or_default();
             }
         }
     }
 
     /// Whether `other` reaches a different server (so cached tools no longer apply).
     pub fn same_target(&self, other: &ServerConfig) -> bool {
-        (self.transport, &self.command, &self.args, &self.env, &self.cwd, &self.url, &self.headers)
-            == (other.transport, &other.command, &other.args, &other.env, &other.cwd, &other.url, &other.headers)
+        (self.transport, &self.url, &self.headers) == (other.transport, &other.url, &other.headers)
     }
 }
 
@@ -212,16 +198,30 @@ pub fn cached_tools(db: &Db, id: &str) -> Option<Catalog> {
     db.kv_get(TOOLS_SCOPE, id).ok().flatten().and_then(|v| serde_json::from_value(v).ok())
 }
 
+/// The transport a client config means: its `type`/`transport` when it names one,
+/// else Gemini CLI's `httpUrl` (Streamable HTTP), else a URL path ending in `/sse`.
+fn import_transport(s: &Value, url: &str) -> Transport {
+    let kind = ["type", "transport"].iter().find_map(|k| s.get(k).and_then(Value::as_str)).unwrap_or_default();
+    match kind.to_ascii_lowercase().as_str() {
+        "sse" => Transport::Sse,
+        "http" | "streamable-http" | "streamable_http" | "streamablehttp" => Transport::Http,
+        _ if s.get("httpUrl").is_some() => Transport::Http,
+        _ if url.split(['?', '#']).next().unwrap_or_default().trim_end_matches('/').ends_with("/sse") => Transport::Sse,
+        _ => Transport::Http,
+    }
+}
+
 /// `mcpServers` JSON as Claude Desktop, Cursor, Windsurf and VS Code (`servers`) write
-/// it, or a bare `{name: {...}}` map, as server configs.
-pub fn parse_import(v: &Value) -> Result<Vec<ServerConfig>, String> {
+/// it, or a bare `{name: {...}}` map: the remote servers, and why the others (local
+/// `command` servers, which the gateway does not run) were left out.
+pub fn parse_import(v: &Value) -> Result<(Vec<ServerConfig>, Vec<String>), String> {
     let map = v
         .get("mcpServers")
         .or_else(|| v.get("servers"))
         .or_else(|| v.get("mcp").and_then(|m| m.get("servers")))
         .unwrap_or(v)
         .as_object()
-        .ok_or("expected an object like {\"mcpServers\": {\"name\": {\"command\": ...}}}")?;
+        .ok_or("expected an object like {\"mcpServers\": {\"name\": {\"url\": ...}}}")?;
     let strings = |v: Option<&Value>| -> BTreeMap<String, String> {
         v.and_then(Value::as_object)
             .map(|o| {
@@ -231,38 +231,29 @@ pub fn parse_import(v: &Value) -> Result<Vec<ServerConfig>, String> {
             })
             .unwrap_or_default()
     };
-    let mut out = Vec::new();
+    let (mut out, mut rejected) = (Vec::new(), Vec::new());
     for (name, s) in map {
         let text = |k: &str| s.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
-        let url = ["url", "serverUrl", "httpUrl"].into_iter().map(&text).find(|u| !u.is_empty());
+        let Some(url) = ["url", "serverUrl", "httpUrl"].into_iter().map(&text).find(|u| !u.is_empty()) else {
+            rejected.push(format!("{name}: only HTTP and SSE servers (a URL) are supported, not local commands"));
+            continue;
+        };
         let mut cfg = ServerConfig {
             id: slug(name),
             name: name.clone(),
             description: text("description"),
+            transport: import_transport(s, &url),
+            headers: strings(s.get("headers")),
+            url,
             enabled: s.get("disabled").and_then(Value::as_bool) != Some(true),
             ..Default::default()
         };
-        match url {
-            Some(url) => {
-                cfg.transport = Transport::Http;
-                cfg.url = url;
-                cfg.headers = strings(s.get("headers"));
-            }
-            None => {
-                cfg.command = text("command");
-                cfg.args = s
-                    .get("args")
-                    .and_then(Value::as_array)
-                    .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
-                    .unwrap_or_default();
-                cfg.env = strings(s.get("env"));
-                cfg.cwd = text("cwd");
-            }
+        match cfg.validate() {
+            Ok(()) => out.push(cfg),
+            Err(e) => rejected.push(format!("{name}: {e}")),
         }
-        cfg.validate().map_err(|e| format!("{name}: {e}"))?;
-        out.push(cfg);
     }
-    Ok(out)
+    Ok((out, rejected))
 }
 
 // ----- search -----------------------------------------------------------------------
@@ -423,12 +414,6 @@ impl Gateway {
         }
     }
 
-    pub fn stderr_tail(&self, id: &str) -> Vec<String> {
-        let Some(slot) = self.slots.lock().get(id).cloned() else { return Vec::new() };
-        let Ok(g) = slot.try_lock() else { return Vec::new() };
-        g.as_ref().map(|l| l.client.stderr_tail()).unwrap_or_default()
-    }
-
     /// The running connection to `cfg`, started if needed.
     async fn live(&self, state: &AppState, cfg: &ServerConfig) -> Result<Arc<Live>> {
         let slot = self.slot(&cfg.id);
@@ -452,7 +437,7 @@ impl Gateway {
         Ok(live)
     }
 
-    /// Stops a running server (kills the process / ends the HTTP session).
+    /// Closes the connection to a server (ending its session).
     pub async fn stop(&self, id: &str) {
         let slot = self.slots.lock().get(id).cloned();
         if let Some(slot) = slot {
@@ -605,24 +590,32 @@ mod tests {
     fn imports_desktop_configs() {
         let v = json!({"mcpServers": {
             "File System": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]},
+            "Linear": {"url": "https://mcp.linear.app/sse"},
             "remote": {"url": "https://example.com/mcp", "headers": {"Authorization": "Bearer x"}, "disabled": true},
+            "typed": {"type": "sse", "url": "https://example.com/events"},
+            "bad": {"url": "ftp://example.com"},
         }});
-        let list = parse_import(&v).unwrap();
-        assert_eq!(list[0].id, "file-system");
-        assert_eq!(list[0].args.len(), 3);
+        let (list, rejected) = parse_import(&v).unwrap();
+        let ids: Vec<&str> = list.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, ["linear", "remote", "typed"]);
+        assert_eq!(list[0].transport, Transport::Sse);
         assert_eq!(list[1].transport, Transport::Http);
+        assert_eq!(list[1].headers["Authorization"], "Bearer x");
         assert!(!list[1].enabled);
-        assert!(parse_import(&json!({"x": {"command": ""}})).is_err());
+        assert_eq!(list[2].transport, Transport::Sse);
+        assert_eq!(rejected.len(), 2, "{rejected:?}");
+        assert!(rejected[0].starts_with("File System: only HTTP and SSE"));
+        assert!(parse_import(&json!([])).is_err());
     }
 
     #[test]
     fn masks_secrets_and_restores_them() {
-        let mut c = ServerConfig { id: "gh".into(), command: "x".into(), ..Default::default() };
-        c.env.insert("GITHUB_TOKEN".into(), "ghp_1".into());
-        c.env.insert("PATH".into(), "/bin".into());
+        let mut c = ServerConfig { id: "gh".into(), url: "https://x".into(), ..Default::default() };
+        c.headers.insert("Authorization".into(), "Bearer ghp_1".into());
+        c.headers.insert("Accept-Language".into(), "en".into());
         let mut m = c.masked();
-        assert_eq!(m.env["GITHUB_TOKEN"], MASK);
-        assert_eq!(m.env["PATH"], "/bin");
+        assert_eq!(m.headers["Authorization"], MASK);
+        assert_eq!(m.headers["Accept-Language"], "en");
         m.unmask(&c);
         assert_eq!(m, c);
     }

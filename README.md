@@ -216,6 +216,18 @@ claude mcp add --transport http zilong-router http://<router>:20128/mcp \
   `mcpServers` JSON from Claude Desktop, Cursor, Windsurf or VS Code: entries with a URL
   are imported (`"type": "sse"` or a URL ending in `/sse` means SSE), `command` entries
   are reported and skipped. Secret-looking headers are masked in the dashboard.
+- **OAuth**: servers that answer 401 (Linear, Notion, Atlassian, Sentry and other hosted
+  MCP servers) get a **Sign in** button. The router follows the MCP authorization spec:
+  it finds the authorization server through the protected resource metadata (RFC 9728)
+  and the server metadata (RFC 8414 / OpenID), registers itself as a client (RFC 7591;
+  for servers without registration, enter a client id and secret in the server's
+  settings) and signs in with an authorization code, PKCE and the `resource` parameter
+  (RFC 8707). The authorization server sends the browser back to
+  `<dashboard origin>/mcp/oauth/callback`, which finishes the sign-in; when that address
+  is not reachable from the browser, paste it into the dashboard instead. Tokens are
+  stored in the `kv` table (scope `mcpAuth`), never shown in the dashboard, and
+  refreshed shortly before they expire or after a 401. When a refresh fails, agents are
+  told to sign in again in the dashboard.
 - **On demand**: a connection opens on the server's first call and closes after
   `MCP_IDLE_SECS` (default 300; 0 keeps it open) without calls. Each server's tool list is
   cached in the database, so `search_tools` does not connect; the refresh button (or a
@@ -434,8 +446,7 @@ opens, and every sync interval (plus once on clean shutdown) pushes changes back
 
 Planned, roughly in order of interest. Nothing here is implemented yet.
 
-- MCP gateway: OAuth sign-in for upstream MCP servers that require it, and resources and
-  prompts next to tools.
+- MCP gateway: resources and prompts next to tools.
 - Gemini wire format (`/v1beta/models/...:generateContent`).
 - Model combos (one name that falls back through a list of provider/model pairs).
 - Embeddings, image and audio endpoints.

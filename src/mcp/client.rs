@@ -64,12 +64,72 @@ fn answer_server_request(method: &str, id: &Value) -> Value {
     }
 }
 
-/// An HTTP error with the start of its body, for the dashboard.
-async fn http_error(resp: reqwest::Response) -> anyhow::Error {
+/// The server answered 401: it wants an OAuth access token (or a fresh one).
+#[derive(Debug)]
+pub struct Unauthorized {
+    /// The `WWW-Authenticate` header, which may point at the resource metadata.
+    pub challenge: Option<String>,
+}
+
+impl std::fmt::Display for Unauthorized {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.challenge {
+            Some(c) => write!(f, "the server requires OAuth sign-in (HTTP 401, {c})"),
+            None => f.write_str("the server requires OAuth sign-in (HTTP 401)"),
+        }
+    }
+}
+
+impl std::error::Error for Unauthorized {}
+
+/// The [`Unauthorized`] somewhere in `e`'s chain.
+pub fn unauthorized(e: &anyhow::Error) -> Option<&Unauthorized> {
+    e.chain().find_map(|c| c.downcast_ref::<Unauthorized>())
+}
+
+/// The OAuth access token sent to one server; the gateway swaps it after a refresh.
+pub type Bearer = Arc<Mutex<Option<String>>>;
+
+/// What every request to one server carries: the configured headers, and the OAuth
+/// access token unless those headers already set `Authorization`.
+#[derive(Clone)]
+pub struct Creds {
+    headers: Arc<Vec<(String, String)>>,
+    bearer: Bearer,
+}
+
+impl Creds {
+    pub fn new(cfg: &ServerConfig, bearer: Bearer) -> Creds {
+        Creds { headers: Arc::new(cfg.headers.iter().map(|(k, v)| (k.clone(), v.clone())).collect()), bearer }
+    }
+
+    fn apply(&self, mut rb: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        for (k, v) in self.headers.iter() {
+            rb = rb.header(k.as_str(), v.as_str());
+        }
+        if !self.headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("authorization")) {
+            if let Some(token) = self.bearer.lock().clone() {
+                rb = rb.bearer_auth(token);
+            }
+        }
+        rb
+    }
+}
+
+/// The response if it succeeded; else [`Unauthorized`] for a 401, or the status with
+/// the start of the body, for the dashboard.
+async fn checked(resp: reqwest::Response) -> Result<reqwest::Response> {
     let status = resp.status();
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        let challenge = resp.headers().get(reqwest::header::WWW_AUTHENTICATE).and_then(|v| v.to_str().ok());
+        return Err(Unauthorized { challenge: challenge.map(str::to_string) }.into());
+    }
+    if status.is_success() {
+        return Ok(resp);
+    }
     let body = resp.text().await.unwrap_or_default();
     let body: String = body.chars().take(300).collect();
-    anyhow!("HTTP {status}: {}", body.trim())
+    bail!("HTTP {status}: {}", body.trim())
 }
 
 fn is_event_stream(resp: &reqwest::Response) -> bool {
@@ -86,15 +146,15 @@ pub enum Client {
 
 impl Client {
     /// Opens a session with the server and runs the `initialize` handshake.
-    pub async fn connect(cfg: &ServerConfig, http: &reqwest::Client) -> Result<Client> {
+    pub async fn connect(cfg: &ServerConfig, http: &reqwest::Client, creds: Creds) -> Result<Client> {
         match cfg.transport {
             Transport::Http => {
-                let c = Http::new(cfg, http.clone());
+                let c = Http::new(cfg, http.clone(), creds);
                 c.handshake(INIT_TIMEOUT).await.context("initialize")?;
                 Ok(Client::Http(c))
             }
             Transport::Sse => {
-                let c = Sse::open(cfg, http.clone()).await?;
+                let c = Sse::open(cfg, http.clone(), creds).await?;
                 c.request("initialize", init_params(), INIT_TIMEOUT).await.context("initialize")?;
                 c.notify("notifications/initialized").await?;
                 Ok(Client::Sse(c))
@@ -136,21 +196,15 @@ type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Value>>>>;
 struct Poster {
     http: reqwest::Client,
     endpoint: String,
-    headers: Vec<(String, String)>,
+    creds: Creds,
 }
 
 impl Poster {
     /// Sends one message. Answers arrive on the event stream; a server that puts one in
     /// the POST body instead gets it returned here.
     async fn post(&self, msg: &Value) -> Result<Option<Value>> {
-        let mut rb = self.http.post(&self.endpoint).header(reqwest::header::CONTENT_TYPE, "application/json");
-        for (k, v) in &self.headers {
-            rb = rb.header(k.as_str(), v.as_str());
-        }
-        let resp = rb.body(msg.to_string()).send().await?;
-        if !resp.status().is_success() {
-            return Err(http_error(resp).await);
-        }
+        let rb = self.http.post(&self.endpoint).header(reqwest::header::CONTENT_TYPE, "application/json");
+        let resp = checked(self.creds.apply(rb).body(msg.to_string()).send().await?).await?;
         let body = resp.text().await.unwrap_or_default();
         let Some(id) = msg.get("id") else { return Ok(None) };
         let Ok(v) = serde_json::from_str::<Value>(&body) else { return Ok(None) };
@@ -176,19 +230,13 @@ impl Drop for Sse {
 
 impl Sse {
     /// Opens the event stream and waits for the `endpoint` event.
-    async fn open(cfg: &ServerConfig, http: reqwest::Client) -> Result<Sse> {
+    async fn open(cfg: &ServerConfig, http: reqwest::Client, creds: Creds) -> Result<Sse> {
         let url = reqwest::Url::parse(cfg.url.trim()).context("invalid URL")?;
-        let headers: Vec<(String, String)> = cfg.headers.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        let mut rb = http.get(url.clone()).header(reqwest::header::ACCEPT, "text/event-stream");
-        for (k, v) in &headers {
-            rb = rb.header(k.as_str(), v.as_str());
-        }
+        let rb = creds.apply(http.get(url.clone()).header(reqwest::header::ACCEPT, "text/event-stream"));
         let resp = tokio::time::timeout(INIT_TIMEOUT, rb.send())
             .await
             .map_err(|_| anyhow!("no answer within {} s", INIT_TIMEOUT.as_secs()))??;
-        if !resp.status().is_success() {
-            return Err(http_error(resp).await);
-        }
+        let resp = checked(resp).await?;
         if !is_event_stream(&resp) {
             bail!("not an SSE endpoint (no text/event-stream); try the Streamable HTTP transport");
         }
@@ -215,7 +263,7 @@ impl Sse {
                             let p = Arc::new(Poster {
                                 http: http.clone(),
                                 endpoint: endpoint.to_string(),
-                                headers: headers.clone(),
+                                creds: creds.clone(),
                             });
                             poster = Some(p.clone());
                             if let Some(tx) = endpoint_tx.take() {
@@ -324,7 +372,7 @@ impl std::error::Error for SessionExpired {}
 
 pub struct Http {
     url: String,
-    headers: Vec<(String, String)>,
+    creds: Creds,
     http: reqwest::Client,
     session: Mutex<Option<String>>,
     protocol: Mutex<Option<String>>,
@@ -337,10 +385,7 @@ impl Drop for Http {
     fn drop(&mut self) {
         let Some(session) = self.session.lock().take() else { return };
         let Ok(rt) = tokio::runtime::Handle::try_current() else { return };
-        let mut rb = self.http.delete(&self.url).header("mcp-session-id", session);
-        for (k, v) in &self.headers {
-            rb = rb.header(k.as_str(), v.as_str());
-        }
+        let rb = self.creds.apply(self.http.delete(&self.url).header("mcp-session-id", session));
         rt.spawn(async move {
             let _ = tokio::time::timeout(Duration::from_secs(5), rb.send()).await;
         });
@@ -348,10 +393,10 @@ impl Drop for Http {
 }
 
 impl Http {
-    fn new(cfg: &ServerConfig, http: reqwest::Client) -> Http {
+    fn new(cfg: &ServerConfig, http: reqwest::Client, creds: Creds) -> Http {
         Http {
             url: cfg.url.trim().to_string(),
-            headers: cfg.headers.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+            creds,
             http,
             session: Mutex::new(None),
             protocol: Mutex::new(None),
@@ -396,14 +441,12 @@ impl Http {
     /// notification, which the server acknowledges with 202).
     async fn post_inner(&self, msg: &Value) -> Result<Option<Value>> {
         let session = self.session.lock().clone();
-        let mut rb = self
+        let rb = self
             .http
             .post(&self.url)
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .header(reqwest::header::ACCEPT, "application/json, text/event-stream");
-        for (k, v) in &self.headers {
-            rb = rb.header(k.as_str(), v.as_str());
-        }
+        let mut rb = self.creds.apply(rb);
         if let Some(s) = &session {
             rb = rb.header("mcp-session-id", s.as_str());
         }
@@ -418,9 +461,7 @@ impl Http {
         if status == reqwest::StatusCode::NOT_FOUND && session.is_some() {
             return Err(SessionExpired.into());
         }
-        if !status.is_success() {
-            return Err(http_error(resp).await);
-        }
+        let resp = checked(resp).await?;
         let Some(id) = msg.get("id") else { return Ok(None) };
         let is_answer = |m: &Value| m.get("id") == Some(id) && m.get("method").is_none();
 

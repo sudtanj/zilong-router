@@ -570,6 +570,17 @@ pages.mcp = async () => {
     </div>
   </div>`;
 };
+function mcpAuthLine(s) {
+  const a = s.auth;
+  if (!a) return '';
+  if (a.status === 'needsSignIn') {
+    return `<p class="xs mt1 row wrap" style="gap:8px">${badge('Sign-in required', 'warning', true)}<a href="#" data-act="mcpSignIn" data-id="${esc(s.id)}" style="color:var(--primary)">Sign in with OAuth</a>${a.error ? `<span class="muted break">${esc(a.error)}</span>` : ''}</p>`;
+  }
+  const mins = a.expiresAt ? Math.round((new Date(a.expiresAt) - Date.now()) / 60000) : null;
+  const left = mins == null ? '' : mins <= 0 ? 'token expired' : mins < 120 ? `token expires in ${mins} min` : `token expires in ${Math.round(mins / 60)} h`;
+  const until = left ? ` · ${left}${a.refreshable ? ', refreshed automatically' : ''}` : '';
+  return `<p class="xs muted mt1">${badge('OAuth', 'success', true)} signed in${a.scope ? ` · <span class="mono">${esc(a.scope)}</span>` : ''}${until}</p>`;
+}
 function mcpRow(s) {
   const target = s.url;
   const st = s.stats || {};
@@ -582,8 +593,12 @@ function mcpRow(s) {
       ${s.description ? `<p class="xs muted mt1">${esc(s.description)}</p>` : ''}
       <p class="xs muted mt1">${tools}${calls}</p>
       ${st.lastError ? `<p class="xs danger mt1 break">${esc(st.lastError)}</p>` : ''}
+      ${mcpAuthLine(s)}
     </div>
     <div class="row gap2 shrink0" style="padding-top:2px">
+      ${s.auth && s.auth.status === 'signedIn'
+        ? `<button class="tiny" data-act="mcpSignOut" data-id="${esc(s.id)}" title="Sign out (forget the OAuth tokens)">${ms('logout', 18)}</button>`
+        : `<button class="tiny" data-act="mcpSignIn" data-id="${esc(s.id)}" title="Sign in with OAuth">${ms('login', 18)}</button>`}
       <button class="tiny" data-act="mcpRefresh" data-id="${esc(s.id)}" title="Reconnect and list tools">${ms('refresh', 18)}</button>
       ${s.status === 'running' ? `<button class="tiny" data-act="mcpStop" data-id="${esc(s.id)}" title="Disconnect">${ms('stop_circle', 18)}</button>` : ''}
       <button class="tiny" data-act="mcpEdit" data-id="${esc(s.id)}" title="Edit">${ms('edit', 18)}</button>
@@ -607,12 +622,19 @@ function mcpForm(s) {
       ${field('url', 'URL', {value: s.url, placeholder: 'https://example.com/mcp', mono: true, required: true})}
       ${field('headers', 'Headers (Name: value, one per line)', {type: 'textarea', rows: 3, value: mapToLines(s.headers, ': '), placeholder: 'Authorization: Bearer …'})}
       ${field('timeoutSecs', 'Call timeout in seconds', {type: 'number', min: 0, value: s.timeoutSecs || '', placeholder: '120'})}
+      <details class="mb4" ${s.oauthClientId || s.oauthScope ? 'open' : ''}><summary class="sm medium" style="cursor:pointer">OAuth (optional)</summary>
+        <p class="hint mt1 mb2">Servers that need OAuth get a Sign in button after a failed call; the router registers itself with their authorization server. Only fill these in if that server does not allow registration.</p>
+        <div class="row gap2" style="align-items:flex-start"><div class="grow">${field('oauthClientId', 'Client id', {value: s.oauthClientId, mono: true})}</div>
+          <div class="grow">${field('oauthClientSecret', 'Client secret', {type: 'password', value: s.oauthClientSecret, placeholder: 'optional'})}</div></div>
+        ${field('oauthScope', 'Scopes', {value: s.oauthScope, placeholder: 'as the server advertises', mono: true})}
+      </details>
       ${edit ? '<p class="hint mb4">Values of secret-looking headers show as ••••••••; leave them as they are to keep them.</p>' : ''}
       ${twoButtons(edit ? 'Save' : 'Add server')}`,
     onSubmit: async (f) => {
       const body = {
         name: f.name.value.trim(), description: f.description.value.trim(), transport: f.transport.value,
         url: f.url.value.trim(), headers: linesToMap(f.headers.value, ':'), timeoutSecs: Number(f.timeoutSecs.value) || 0,
+        oauthClientId: f.oauthClientId.value.trim(), oauthClientSecret: f.oauthClientSecret.value, oauthScope: f.oauthScope.value.trim(),
       };
       if (edit) await patch(mcpPath(s.id), body);
       else await post('/mcp/servers', {...body, id: f.sid.value.trim() || slugify(body.name), enabled: true});
@@ -645,6 +667,42 @@ actions.mcpDelete = async ({id}) => {
 actions.mcpTools = async ({id}) => {
   const s = mcpCache.find((x) => x.id === id);
   mcpToolsModal(s.name, (await get(mcpPath(id, '/tools'))).tools);
+};
+// OAuth sign-in to an MCP server: the authorization server sends the browser back to
+// /mcp/oauth/callback on this origin, which finishes by itself and tells this tab; if
+// that address does not reach the router, the user pastes it here instead.
+actions.mcpSignIn = async ({id}) => {
+  const s = mcpCache.find((x) => x.id === id);
+  const r = await post(mcpPath(id, '/oauth/start'), {origin: location.origin});
+  let channel = null;
+  const m = openModal({
+    title: 'Sign in to ' + s.name,
+    body: `<ol class="sm muted" style="margin:0 0 12px 18px;line-height:1.7">
+        <li>Open the sign-in page, log in and allow access.</li>
+        <li>You come back to <code>${esc(r.redirectUri)}</code>, which finishes the sign-in; this window closes by itself.</li>
+        <li>If that page does not load, copy its whole address from the address bar and paste it below.</li></ol>
+      <a class="btn primary full mb4" href="${esc(r.authUrl)}" target="_blank" rel="noopener">${ms('open_in_new')}Open sign-in page</a>`
+      + field('callback', 'Callback URL', {type: 'textarea', rows: 3, placeholder: r.redirectUri + '?code=…&state=…', required: true})
+      + twoButtons('Connect'),
+    onSubmit: async (f) => {
+      await post(mcpPath(id, '/oauth/exchange'), {session: r.session, callback: f.callback.value.trim()});
+      notify('success', `${s.name}: signed in`); reload();
+    },
+    onClose: () => { if (channel) channel.close(); },
+  });
+  try {
+    channel = new BroadcastChannel('zilong-router-mcp-oauth');
+    channel.onmessage = (e) => {
+      if (!e.data || e.data.server !== id) { if (e.data && !e.data.ok) notify('error', e.data.error); return; }
+      m.close(); notify('success', `${s.name}: signed in`); reload();
+    };
+  } catch (_) {}
+};
+actions.mcpSignOut = async ({id}) => {
+  const s = mcpCache.find((x) => x.id === id);
+  if (await confirmModal({title: 'Sign out', message: `Forget the OAuth tokens for "${s.name}"? Agents lose its tools until you sign in again.`, confirmText: 'Sign out'})) {
+    await del(mcpPath(id, '/oauth')); reload();
+  }
 };
 actions.mcpRefresh = async ({id}, b) => {
   const icon = $('.ms', b); if (icon) icon.classList.add('spin');

@@ -1,7 +1,8 @@
 //! End-to-end checks for the MCP gateway: the real `zilong-router` binary in front of a
 //! mock Streamable HTTP MCP server (sessions, paginated tool lists, SSE answers, an
-//! upstream auth header) and a mock server on the older HTTP+SSE transport (an event
-//! stream naming a POST endpoint, answers on the stream).
+//! upstream auth header), a mock server on the older HTTP+SSE transport (an event
+//! stream naming a POST endpoint, answers on the stream), and one behind OAuth (resource
+//! and authorization server metadata, dynamic registration, PKCE, refresh tokens).
 
 use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
@@ -17,9 +18,10 @@ use axum::extract::{Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use axum::{Json, Router};
+use axum::{Form, Json, Router};
 use futures_util::StreamExt;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -190,6 +192,173 @@ async fn start_sse_upstream(u: SseUpstream) -> String {
     let url = format!("http://{}", listener.local_addr().unwrap());
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     url
+}
+
+// ----- mock OAuth-protected server -----------------------------------------------------
+
+/// A Streamable HTTP server behind OAuth, with its own authorization server under
+/// `/auth`: dynamic registration, PKCE authorization codes and rotating refresh tokens.
+#[derive(Clone, Default)]
+struct OauthUpstream {
+    base: Arc<Mutex<String>>,
+    /// Access tokens the MCP endpoint accepts.
+    access: Arc<Mutex<HashSet<String>>>,
+    /// Refresh tokens the token endpoint accepts (each one once).
+    refresh: Arc<Mutex<HashSet<String>>>,
+    /// Authorization code -> (PKCE challenge, redirect URI).
+    codes: Arc<Mutex<HashMap<String, (String, String)>>>,
+    issued: Arc<AtomicUsize>,
+    refreshes: Arc<AtomicUsize>,
+    registrations: Arc<AtomicUsize>,
+}
+
+impl OauthUpstream {
+    fn base(&self) -> String {
+        self.base.lock().unwrap().clone()
+    }
+
+    fn issue(&self) -> Value {
+        let n = self.issued.fetch_add(1, Ordering::SeqCst) + 1;
+        let (access, refresh) = (format!("access-{n}"), format!("refresh-{n}"));
+        self.access.lock().unwrap().insert(access.clone());
+        self.refresh.lock().unwrap().insert(refresh.clone());
+        json!({"access_token": access, "refresh_token": refresh, "token_type": "Bearer", "expires_in": 3600,
+            "scope": "tools"})
+    }
+}
+
+fn b64url(data: &[u8]) -> String {
+    const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::new();
+    for chunk in data.chunks(3) {
+        let n = chunk.iter().enumerate().fold(0u32, |n, (i, b)| n | ((*b as u32) << (16 - 8 * i)));
+        for i in 0..chunk.len() + 1 {
+            out.push(ABC[((n >> (18 - 6 * i)) & 63) as usize] as char);
+        }
+    }
+    out
+}
+
+async fn oauth_mcp(State(u): State<OauthUpstream>, headers: HeaderMap, Json(msg): Json<Value>) -> Response {
+    let token = headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok());
+    let token = token.and_then(|v| v.strip_prefix("Bearer "));
+    if !token.is_some_and(|t| u.access.lock().unwrap().contains(t)) {
+        let challenge = format!(r#"Bearer resource_metadata="{}/.well-known/oauth-protected-resource/mcp""#, u.base());
+        return (StatusCode::UNAUTHORIZED, [(header::WWW_AUTHENTICATE, challenge)], "sign in first").into_response();
+    }
+    let id = msg["id"].clone();
+    if id.is_null() {
+        return StatusCode::ACCEPTED.into_response();
+    }
+    let body = match msg["method"].as_str() {
+        Some("initialize") => {
+            let result = json!({"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
+                "serverInfo": {"name": "mock-oauth", "version": "1"}});
+            response(&id, Ok(result))
+        }
+        _ => response(&id, answer(&msg, "oauth: ")),
+    };
+    Json(body).into_response()
+}
+
+async fn oauth_resource_metadata(State(u): State<OauthUpstream>) -> Json<Value> {
+    let base = u.base();
+    Json(json!({"resource": format!("{base}/mcp"), "authorization_servers": [format!("{base}/auth")],
+        "scopes_supported": ["tools"]}))
+}
+
+async fn oauth_server_metadata(State(u): State<OauthUpstream>) -> Json<Value> {
+    let base = u.base();
+    Json(json!({
+        "issuer": format!("{base}/auth"),
+        "authorization_endpoint": format!("{base}/auth/authorize"),
+        "token_endpoint": format!("{base}/auth/token"),
+        "registration_endpoint": format!("{base}/auth/register"),
+        "code_challenge_methods_supported": ["S256"],
+    }))
+}
+
+async fn oauth_register(State(u): State<OauthUpstream>, Json(body): Json<Value>) -> Response {
+    if body["redirect_uris"].as_array().map_or(0, Vec::len) != 1 || body["token_endpoint_auth_method"] != "none" {
+        return (StatusCode::BAD_REQUEST, Json(json!({"error": "invalid_client_metadata"}))).into_response();
+    }
+    u.registrations.fetch_add(1, Ordering::SeqCst);
+    let client = json!({"client_id": "client-1", "redirect_uris": body["redirect_uris"]});
+    (StatusCode::CREATED, Json(client)).into_response()
+}
+
+/// Signs the "user" in at once and sends the browser back with a code.
+async fn oauth_authorize(State(u): State<OauthUpstream>, Query(q): Query<HashMap<String, String>>) -> Response {
+    let get = |k: &str| q.get(k).cloned().unwrap_or_default();
+    let ok = get("response_type") == "code"
+        && get("client_id") == "client-1"
+        && get("code_challenge_method") == "S256"
+        && !get("code_challenge").is_empty()
+        && get("resource") == format!("{}/mcp", u.base())
+        && get("scope") == "tools";
+    if !ok {
+        return (StatusCode::BAD_REQUEST, format!("bad authorization request: {q:?}")).into_response();
+    }
+    let code = format!("code-{}", u.codes.lock().unwrap().len() + 1);
+    u.codes.lock().unwrap().insert(code.clone(), (get("code_challenge"), get("redirect_uri")));
+    let location = format!("{}?code={code}&state={}", get("redirect_uri"), get("state"));
+    (StatusCode::FOUND, [(header::LOCATION, location)]).into_response()
+}
+
+async fn oauth_token(State(u): State<OauthUpstream>, Form(f): Form<HashMap<String, String>>) -> Response {
+    let get = |k: &str| f.get(k).cloned().unwrap_or_default();
+    let invalid = || (StatusCode::BAD_REQUEST, Json(json!({"error": "invalid_grant"}))).into_response();
+    if get("client_id") != "client-1" || get("resource") != format!("{}/mcp", u.base()) {
+        return invalid();
+    }
+    match get("grant_type").as_str() {
+        "authorization_code" => {
+            let Some((challenge, redirect)) = u.codes.lock().unwrap().remove(&get("code")) else { return invalid() };
+            let verified = b64url(&Sha256::digest(get("code_verifier").as_bytes())) == challenge;
+            if !verified || redirect != get("redirect_uri") {
+                return invalid();
+            }
+        }
+        "refresh_token" => {
+            if !u.refresh.lock().unwrap().remove(&get("refresh_token")) {
+                return invalid();
+            }
+            u.refreshes.fetch_add(1, Ordering::SeqCst);
+        }
+        _ => return invalid(),
+    }
+    Json(u.issue()).into_response()
+}
+
+/// Forget every access token, as if they expired early.
+async fn oauth_revoke(State(u): State<OauthUpstream>) -> StatusCode {
+    u.access.lock().unwrap().clear();
+    StatusCode::OK
+}
+
+async fn start_oauth_upstream(u: OauthUpstream) -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    *u.base.lock().unwrap() = url.clone();
+    let app = Router::new()
+        .route("/mcp", post(oauth_mcp))
+        .route("/.well-known/oauth-protected-resource/mcp", get(oauth_resource_metadata))
+        .route("/.well-known/oauth-authorization-server/auth", get(oauth_server_metadata))
+        .route("/auth/register", post(oauth_register))
+        .route("/auth/authorize", get(oauth_authorize))
+        .route("/auth/token", post(oauth_token))
+        .route("/revoke", post(oauth_revoke))
+        .with_state(u);
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    url
+}
+
+/// Follows an authorization URL as the browser would, up to the redirect back.
+async fn authorize(url: &str) -> String {
+    let http = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build().unwrap();
+    let resp = http.get(url).send().await.unwrap();
+    assert_eq!(resp.status(), 302, "{url}");
+    resp.headers()[reqwest::header::LOCATION].to_str().unwrap().to_string()
 }
 
 // ----- the router ------------------------------------------------------------------------
@@ -498,4 +667,58 @@ async fn only_remote_servers_are_accepted() {
     assert_eq!(r["rejected"].as_array().unwrap().len(), 1, "{r}");
     let list = admin(reqwest::Method::GET, base, "/mcp/servers", None).await;
     assert_eq!(list["servers"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn oauth_servers_sign_in_and_refresh() {
+    let upstream = OauthUpstream::default();
+    let up = start_oauth_upstream(upstream.clone()).await;
+    let router = start_router("oauth", 300).await;
+    let base = router.base.as_str();
+    add_server(base, json!({"id": "secure", "url": format!("{up}/mcp")})).await;
+
+    // Before the sign-in, agents are told to sign in and the dashboard shows it.
+    let r = run(base, None, "secure__echo", json!({"text": "x"})).await;
+    assert_eq!(r["isError"], true, "{r}");
+    assert!(first_text(&r).contains("requires OAuth sign-in"), "{r}");
+    assert_eq!(server_status(base, "secure").await["auth"]["status"], "needsSignIn");
+
+    // Sign in: the authorization server sends the browser to the router's callback.
+    let origin = json!({"origin": base});
+    let start = admin(reqwest::Method::POST, base, "/mcp/servers/secure/oauth/start", Some(origin.clone())).await;
+    assert_eq!(start["redirectUri"], format!("{base}/mcp/oauth/callback"));
+    let callback = authorize(start["authUrl"].as_str().unwrap()).await;
+    assert!(callback.starts_with(&format!("{base}/mcp/oauth/callback?code=")), "{callback}");
+    let page = reqwest::get(&callback).await.unwrap();
+    assert_eq!(page.status(), 200);
+    assert!(page.text().await.unwrap().contains("Signed in"));
+    assert_eq!(upstream.registrations.load(Ordering::SeqCst), 1);
+
+    let r = run(base, None, "secure__echo", json!({"text": "hi"})).await;
+    assert_eq!(first_text(&r), "oauth: hi", "{r}");
+    let s = server_status(base, "secure").await;
+    assert_eq!(s["auth"]["status"], "signedIn", "{s}");
+    assert!(!s.to_string().contains("access-") && !s.to_string().contains("refresh-"), "tokens leak: {s}");
+
+    // The server stops accepting the token: the gateway refreshes it and retries.
+    reqwest::Client::new().post(format!("{up}/revoke")).send().await.unwrap();
+    let r = run(base, None, "secure__echo", json!({"text": "again"})).await;
+    assert_eq!(first_text(&r), "oauth: again", "{r}");
+    assert_eq!(upstream.refreshes.load(Ordering::SeqCst), 1);
+
+    // Signing in again reuses the registered client; pasting the callback URL works too.
+    let start = admin(reqwest::Method::POST, base, "/mcp/servers/secure/oauth/start", Some(origin)).await;
+    let callback = authorize(start["authUrl"].as_str().unwrap()).await;
+    let body = json!({"session": start["session"], "callback": callback});
+    let s = admin(reqwest::Method::POST, base, "/mcp/servers/secure/oauth/exchange", Some(body)).await;
+    assert_eq!(s["auth"]["status"], "signedIn", "{s}");
+    assert_eq!(upstream.registrations.load(Ordering::SeqCst), 1);
+    let r = run(base, None, "secure__add", json!({"a": 1, "b": 2})).await;
+    assert_eq!(first_text(&r), "3", "{r}");
+
+    // Signing out forgets the tokens.
+    admin(reqwest::Method::DELETE, base, "/mcp/servers/secure/oauth", None).await;
+    assert!(server_status(base, "secure").await["auth"].is_null());
+    let r = run(base, None, "secure__echo", json!({"text": "x"})).await;
+    assert_eq!(r["isError"], true, "{r}");
 }

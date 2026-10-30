@@ -11,6 +11,7 @@
 //! does not open connections. Connections are opened on first use and closed after
 //! `MCP_IDLE_SECS` without calls.
 
+pub mod auth;
 pub mod client;
 pub mod server;
 
@@ -60,6 +61,11 @@ pub struct ServerConfig {
     pub enabled: bool,
     /// Per-call timeout; 0 means the default (120 s).
     pub timeout_secs: u64,
+    /// OAuth client for authorization servers without dynamic client registration.
+    pub oauth_client_id: String,
+    pub oauth_client_secret: String,
+    /// Scopes to ask for instead of the ones the server advertises.
+    pub oauth_scope: String,
 }
 
 impl Default for ServerConfig {
@@ -73,6 +79,9 @@ impl Default for ServerConfig {
             headers: BTreeMap::new(),
             enabled: true,
             timeout_secs: 0,
+            oauth_client_id: String::new(),
+            oauth_client_secret: String::new(),
+            oauth_scope: String::new(),
         }
     }
 }
@@ -127,13 +136,17 @@ impl ServerConfig {
         Ok(())
     }
 
-    /// Copy for the dashboard with secret-looking header values hidden.
+    /// Copy for the dashboard with secret-looking header values and the OAuth client
+    /// secret hidden.
     pub fn masked(&self) -> ServerConfig {
         let mut c = self.clone();
         for (k, v) in c.headers.iter_mut() {
             if is_secret(k) && !v.is_empty() {
                 *v = MASK.to_string();
             }
+        }
+        if !c.oauth_client_secret.is_empty() {
+            c.oauth_client_secret = MASK.to_string();
         }
         c
     }
@@ -144,6 +157,9 @@ impl ServerConfig {
             if v == MASK {
                 *v = old.headers.get(k).cloned().unwrap_or_default();
             }
+        }
+        if self.oauth_client_secret == MASK {
+            self.oauth_client_secret = old.oauth_client_secret.clone();
         }
     }
 
@@ -184,7 +200,8 @@ pub fn save_server(db: &Db, cfg: &ServerConfig) -> Result<()> {
 
 pub fn delete_server(db: &Db, id: &str) -> Result<()> {
     db.kv_set(SCOPE, id, None)?;
-    db.kv_set(TOOLS_SCOPE, id, None)
+    db.kv_set(TOOLS_SCOPE, id, None)?;
+    auth::forget(db, id)
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -340,8 +357,40 @@ pub fn params_summary(schema: &Value) -> String {
 
 // ----- running servers ----------------------------------------------------------------
 
+/// The server's own `Authorization` header wins over OAuth.
+fn custom_auth(cfg: &ServerConfig) -> bool {
+    cfg.headers.keys().any(|k| k.eq_ignore_ascii_case("authorization"))
+}
+
+/// A 401 even with a fresh token: the sign-in no longer works.
+fn still_unauthorized(state: &AppState, cfg: &ServerConfig, e: anyhow::Error) -> anyhow::Error {
+    match client::unauthorized(&e) {
+        Some(_) => auth::mark_needs_sign_in(&state.db, &cfg.id, "the server rejected a freshly issued token"),
+        None => e,
+    }
+}
+
+/// Connects with the server's OAuth token, if it has one, refreshing it once after a
+/// 401. A 401 without a way to refresh becomes the "sign in" error.
+async fn connect(state: &AppState, cfg: &ServerConfig, bearer: &client::Bearer) -> Result<Client> {
+    let token = auth::token(state, cfg).await?;
+    *bearer.lock() = token;
+    let creds = client::Creds::new(cfg, bearer.clone());
+    match Client::connect(cfg, &state.http, creds.clone()).await {
+        Err(e) if client::unauthorized(&e).is_some() && !custom_auth(cfg) => {
+            let failed = bearer.lock().clone();
+            let token = auth::recover(state, cfg, failed.as_deref()).await?;
+            *bearer.lock() = Some(token);
+            Client::connect(cfg, &state.http, creds).await.map_err(|e| still_unauthorized(state, cfg, e))
+        }
+        r => r,
+    }
+}
+
 struct Live {
     client: Client,
+    /// The OAuth token its requests carry; replaced after a refresh.
+    bearer: client::Bearer,
     last_used: Mutex<Instant>,
     inflight: AtomicUsize,
 }
@@ -422,7 +471,8 @@ impl Gateway {
             return Ok(l.clone());
         }
         let started = Instant::now();
-        let client = match Client::connect(cfg, &state.http).await {
+        let bearer = client::Bearer::default();
+        let client = match connect(state, cfg, &bearer).await {
             Ok(c) => c,
             Err(e) => {
                 let e = format!("{e:#}");
@@ -432,9 +482,35 @@ impl Gateway {
             }
         };
         tracing::info!("mcp {}: connected in {} ms", cfg.id, started.elapsed().as_millis());
-        let live = Arc::new(Live { client, last_used: Mutex::new(Instant::now()), inflight: AtomicUsize::new(0) });
+        let live =
+            Arc::new(Live { client, bearer, last_used: Mutex::new(Instant::now()), inflight: AtomicUsize::new(0) });
         *guard = Some(live.clone());
         Ok(live)
+    }
+
+    /// One request on `live`, with the OAuth token refreshed shortly before it expires,
+    /// and once more after a 401.
+    async fn request(
+        &self,
+        state: &AppState,
+        cfg: &ServerConfig,
+        live: &Live,
+        method: &str,
+        params: Value,
+    ) -> Result<Value> {
+        if let Some(token) = auth::token(state, cfg).await? {
+            *live.bearer.lock() = Some(token);
+        }
+        match live.client.request(method, params.clone(), cfg.timeout()).await {
+            Err(e) if client::unauthorized(&e).is_some() && !custom_auth(cfg) => {
+                let failed = live.bearer.lock().clone();
+                let token = auth::recover(state, cfg, failed.as_deref()).await?;
+                *live.bearer.lock() = Some(token);
+                let result = live.client.request(method, params, cfg.timeout()).await;
+                result.map_err(|e| still_unauthorized(state, cfg, e))
+            }
+            r => r,
+        }
     }
 
     /// Closes the connection to a server (ending its session).
@@ -483,7 +559,7 @@ impl Gateway {
                 Some(c) => json!({"cursor": c}),
                 None => json!({}),
             };
-            let page = live.client.request("tools/list", params, cfg.timeout()).await.map_err(|e| {
+            let page = self.request(state, cfg, &live, "tools/list", params).await.map_err(|e| {
                 self.record(&cfg.id, 0, Some(format!("tools/list: {e:#}")), false);
                 e
             })?;
@@ -505,7 +581,7 @@ impl Gateway {
         let result = async {
             let live = self.live(state, cfg).await?;
             let _busy = live.busy();
-            live.client.request("tools/call", json!({"name": tool, "arguments": args}), cfg.timeout()).await
+            self.request(state, cfg, &live, "tools/call", json!({"name": tool, "arguments": args})).await
         }
         .await;
         let ms = started.elapsed().as_millis() as u64;

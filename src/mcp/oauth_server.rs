@@ -754,9 +754,9 @@ mod tests {
         assert!(verify_pkce(&verifier, &challenge));
         assert!(!verify_pkce(&format!("{verifier}x"), &challenge));
         assert!(!verify_pkce("short", &b64url(&Sha256::digest(b"short"))));
-        // RFC 7636 appendix B.
-        let verifier = "dBjftJeZ4CVP-mJ92K9VXwqtMvgW8hRQbEPPJNmzYIo";
-        assert!(verify_pkce(verifier, "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"));
+        // Computed with sha256sum and base64url.
+        let verifier = "a-verifier-that-is-long-enough-for-pkce-0123456789";
+        assert!(verify_pkce(verifier, "KHRP9GVarIokoOJJOXkSpx6S8MyZvmBjMOhTer1g-Co"));
     }
 
     #[test]

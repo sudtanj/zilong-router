@@ -152,6 +152,10 @@ pub fn authenticate(
 ) -> Result<Caller, AuthError> {
     let key = extract_key(headers, query);
     if let Some(k) = key {
+        // OAuth access tokens (see `mcp::oauth_server`) stand for the API key the user chose.
+        if let Some(row) = crate::mcp::oauth_server::key_for_token(db, &k) {
+            return Ok(Caller::Key(row));
+        }
         return match db.api_key(&k) {
             Ok(Some(row)) if row.is_active => Ok(Caller::Key(row)),
             _ => Err(AuthError::Invalid),

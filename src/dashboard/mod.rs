@@ -202,6 +202,8 @@ pub fn routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/mcp/servers/:id/oauth/start", post(api::mcp_oauth_start))
         .route("/mcp/servers/:id/oauth/exchange", post(api::mcp_oauth_exchange))
         .route("/mcp/import", post(api::mcp_import))
+        .route("/mcp/clients", get(api::mcp_clients))
+        .route("/mcp/clients/:id", delete(api::mcp_client_revoke))
         .route("/logout", post(api::logout))
         .route_layer(middleware::from_fn_with_state(state, guard))
         // Added after the guard layer, so these two stay public.

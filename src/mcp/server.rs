@@ -74,11 +74,14 @@ async fn handle(
     let caller = match authenticate(&state.cfg, &state.db, require, peer.ip(), &headers, uri.query()) {
         Ok(c) => c,
         Err(e) => {
-            let msg = match e {
-                AuthError::Missing => "API key required: send Authorization: Bearer <api key>",
-                AuthError::Invalid => "Invalid API key",
+            let (msg, invalid) = match e {
+                AuthError::Missing => ("API key required: send Authorization: Bearer <api key>, or sign in", false),
+                AuthError::Invalid => ("Invalid API key or token", true),
             };
-            return (StatusCode::UNAUTHORIZED, Json(rpc_error(Value::Null, -32001, msg))).into_response();
+            // Points OAuth-capable clients at the sign-in (see `oauth_server`).
+            let challenge = super::oauth_server::challenge(&headers, uri.path(), invalid);
+            let body = Json(rpc_error(Value::Null, -32001, msg));
+            return (StatusCode::UNAUTHORIZED, [(header::WWW_AUTHENTICATE, challenge)], body).into_response();
         }
     };
     let msg: Value = match serde_json::from_slice(&body) {

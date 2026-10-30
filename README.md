@@ -29,7 +29,8 @@ Orange Pi Zero 3:
   and more), plus the RTK / Caveman token saver.
 - An MCP gateway (`/mcp`): one MCP endpoint in front of all your MCP servers, with
   Composio-style meta tools (search, schema, call) so the agent's context holds four tool
-  definitions instead of hundreds. See [MCP gateway](#mcp-gateway).
+  definitions instead of hundreds; Claude, ChatGPT and Cursor connectors sign in to it with
+  OAuth. See [MCP gateway](#mcp-gateway).
 - A port of the 9router web dashboard, served by the same binary with no Node and no
   build step.
 - Usage and cost per request in SQLite, priced from upstream's pricing table, with
@@ -239,7 +240,43 @@ claude mcp add --transport http zilong-router http://<router>:20128/mcp \
   `tools/list_changed` notification) reloads it.
 - **Access**: the API keys of `/v1`, with the same rules (loopback clients need no key
   unless `requireApiKey` is set). A restricted key reaches only the servers on its allow
-  list as `mcp/<server id>`, or all of them with `mcp/*`.
+  list as `mcp/<server id>`, or all of them with `mcp/*`. Clients can also sign in with
+  OAuth instead of carrying a key (below).
+
+### Sign in with OAuth (Claude, ChatGPT, Cursor connectors)
+
+Clients that implement the MCP authorization spec (Claude.ai and Claude Desktop custom
+connectors, ChatGPT connectors, Cursor, VS Code, the MCP Inspector) only need the URL,
+`https://<router>/mcp`: no header, no key. The router is its own authorization server:
+
+- Without credentials (or with an invalid one) `/mcp` and `/mcp/all` answer 401 with
+  `WWW-Authenticate: Bearer resource_metadata="<origin>/.well-known/oauth-protected-resource/mcp"`.
+  The protected resource metadata (RFC 9728) names the router as the authorization
+  server, whose metadata (RFC 8414, also at `/.well-known/openid-configuration`) lists
+  `/oauth/register` (dynamic client registration, RFC 7591), `/oauth/authorize` and
+  `/oauth/token`. The origin comes from `Host`, or `X-Forwarded-Proto` / `X-Forwarded-Host`
+  behind a reverse proxy.
+- The client opens `/oauth/authorize` in the browser: a consent page asks for the
+  dashboard password (not needed when the browser is logged in to the dashboard), then
+  which existing API key the app acts as, or creates a new key named after the app. The
+  app gets exactly that key's access, restrictions included. While the dashboard still
+  uses the default password `123456`, the page refuses the password: set your own first.
+- Authorization codes are single-use, live 60 s and need PKCE (S256). Access tokens are
+  opaque, live 1 hour and are stored only as sha256 hashes (`kv` scope `mcpOAuthTokens`);
+  refresh tokens live 30 days and rotate on every use. Redirect URIs must be https,
+  http on `localhost`, or an app scheme such as `cursor://`.
+- The access token stands for the chosen key everywhere a key is accepted, so it works
+  on `/v1` too (usage is recorded under that key). Disabling or deleting the key ends the
+  app's tokens at once.
+- The **MCP Gateway** page lists connected apps (name, key, last use) with a **Revoke**
+  button, which forgets the app and its tokens.
+- Claude.ai and ChatGPT connect from their own servers, so the router must be reachable
+  over public https, for example with `tailscale funnel 20128` or a Cloudflare Tunnel.
+  Claude Desktop, Cursor and the Inspector run on your machine and can use the LAN or
+  `localhost` address.
+
+If `requireApiKey` is off, loopback clients still need nothing; OAuth is then only used
+by clients that reach the router from elsewhere.
 - **Observability**: the page shows each server's state, tool count, calls, errors, the
   last error; every call is logged to the Console Log.
 - Server definitions live in the `kv` table (scopes `mcpServers` and `mcpTools`), so the

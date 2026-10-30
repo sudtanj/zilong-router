@@ -13,6 +13,7 @@
 
 pub mod auth;
 pub mod client;
+pub mod oauth_server;
 pub mod server;
 
 use std::collections::{BTreeMap, HashMap, HashSet};

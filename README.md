@@ -37,7 +37,7 @@ Orange Pi Zero 3:
 - Provider definitions are **copied from upstream automatically**: a weekly GitHub
   Actions job clones 9router and converts its registry to `data/providers.json`. No
   hand-maintained provider list.
-- <!-- bench:summary -->Small: a 6.7 MiB binary that is ready 13 ms after start and idles at 8.0 MiB RSS; 100 concurrent streaming requests with 32 KiB prompts peak at 41.9 MiB (1 worker thread(s); see [Benchmark](#benchmark)).<!-- /bench:summary -->
+- <!-- bench:summary -->Small: a 6.8 MiB binary that is ready 13 ms after start and idles at 8.1 MiB RSS; 100 concurrent streaming requests with 32 KiB prompts peak at 42.5 MiB (1 worker thread(s); see [Benchmark](#benchmark)).<!-- /bench:summary -->
 
 Not (yet) included: Gemini wire format, model combos, embeddings,
 image/audio, and providers that need IDE-impersonation executors (Cursor, Windsurf, Kiro
@@ -361,7 +361,7 @@ are bounded by concurrency, not by the router. Expect the Orange Pi's slower cor
 latency under load; memory carries over.
 
 <!-- bench:report -->
-Measured 2026-10-30 on aarch64 at commit `0974b3a`. Binary 6.7 MiB. The mock upstream streams 8 chunks 25 ms apart (about 200 ms per request); every request carries a 32 KiB system prompt; requests rotate between OpenAI JSON, OpenAI streaming and Anthropic Messages streaming, and each is logged to SQLite.
+Measured 2026-10-30 on aarch64 at commit `f5c0f0f`. Binary 6.8 MiB. The mock upstream streams 8 chunks 25 ms apart (about 200 ms per request); every request carries a 32 KiB system prompt; requests rotate between OpenAI JSON, OpenAI streaming and Anthropic Messages streaming, and each is logged to SQLite.
 
 ### 1 worker thread(s)
 
@@ -369,17 +369,17 @@ Ready 13 ms after spawn.
 
 | State | RSS | Threads |
 |---|---:|---:|
-| Idle, 2 s after start | 8.0 MiB | 2 |
-| Idle after 30 sequential requests | 8.7 MiB | 2 |
-| Idle, 5 s after the load runs | 41.8 MiB | 2 |
-| Peak for the whole run (VmHWM) | 41.8 MiB | |
+| Idle, 2 s after start | 8.1 MiB | 2 |
+| Idle after 30 sequential requests | 8.9 MiB | 2 |
+| Idle, 5 s after the load runs | 41.0 MiB | 2 |
+| Peak for the whole run (VmHWM) | 42.1 MiB | |
 
 | Concurrency | Requests | Errors | Req/s | p50 | p99 | Peak RSS |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1 | 30 | 0 | 5 | 210 ms | 212 ms | 8.8 MiB |
-| 10 | 1000 | 0 | 47 | 210 ms | 248 ms | 12.7 MiB |
-| 50 | 1000 | 0 | 233 | 210 ms | 245 ms | 26.1 MiB |
-| 100 | 1000 | 0 | 444 | 212 ms | 281 ms | 41.9 MiB |
+| 1 | 30 | 0 | 5 | 210 ms | 211 ms | 9.0 MiB |
+| 10 | 1000 | 0 | 47 | 209 ms | 222 ms | 12.3 MiB |
+| 50 | 1000 | 0 | 226 | 210 ms | 327 ms | 27.0 MiB |
+| 100 | 1000 | 0 | 441 | 211 ms | 284 ms | 42.5 MiB |
 
 ### 2 worker thread(s)
 
@@ -387,17 +387,17 @@ Ready 13 ms after spawn.
 
 | State | RSS | Threads |
 |---|---:|---:|
-| Idle, 2 s after start | 8.0 MiB | 3 |
-| Idle after 30 sequential requests | 9.2 MiB | 3 |
-| Idle, 5 s after the load runs | 37.6 MiB | 3 |
-| Peak for the whole run (VmHWM) | 39.3 MiB | |
+| Idle, 2 s after start | 8.2 MiB | 3 |
+| Idle after 30 sequential requests | 9.4 MiB | 3 |
+| Idle, 5 s after the load runs | 42.0 MiB | 3 |
+| Peak for the whole run (VmHWM) | 42.4 MiB | |
 
 | Concurrency | Requests | Errors | Req/s | p50 | p99 | Peak RSS |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1 | 30 | 0 | 5 | 210 ms | 212 ms | 9.3 MiB |
-| 10 | 1000 | 0 | 47 | 210 ms | 228 ms | 13.1 MiB |
-| 50 | 1000 | 0 | 232 | 210 ms | 235 ms | 26.1 MiB |
-| 100 | 1000 | 0 | 451 | 211 ms | 265 ms | 39.7 MiB |
+| 1 | 30 | 0 | 5 | 210 ms | 212 ms | 9.5 MiB |
+| 10 | 1000 | 0 | 47 | 210 ms | 248 ms | 13.1 MiB |
+| 50 | 1000 | 0 | 233 | 210 ms | 230 ms | 27.2 MiB |
+| 100 | 1000 | 0 | 447 | 211 ms | 268 ms | 42.6 MiB |
 <!-- /bench:report -->
 
 Memory stays near the peak after a burst because the allocator keeps freed pages for reuse.

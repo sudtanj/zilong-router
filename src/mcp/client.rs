@@ -31,14 +31,41 @@ fn init_params() -> Value {
     })
 }
 
-/// The `result` of a JSON-RPC response, or its `error` as an `Err`.
+/// A JSON-RPC error the server answered with.
+#[derive(Debug)]
+pub struct RpcError {
+    pub code: Option<i64>,
+    pub message: String,
+}
+
+impl std::fmt::Display for RpcError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.code {
+            Some(code) => write!(f, "{} ({code})", self.message),
+            None => f.write_str(&self.message),
+        }
+    }
+}
+
+impl std::error::Error for RpcError {}
+
+/// The server sent no answer in time.
+#[derive(Debug)]
+pub struct Timeout(pub u64);
+
+impl std::fmt::Display for Timeout {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "no answer within {} s", self.0)
+    }
+}
+
+impl std::error::Error for Timeout {}
+
+/// The `result` of a JSON-RPC response, or its `error` as an `Err` ([`RpcError`]).
 fn into_result(msg: Value) -> Result<Value> {
     if let Some(e) = msg.get("error") {
-        let text = e.get("message").and_then(Value::as_str).unwrap_or("error");
-        match e.get("code").and_then(Value::as_i64) {
-            Some(code) => bail!("{text} ({code})"),
-            None => bail!("{text}"),
-        }
+        let message = e.get("message").and_then(Value::as_str).unwrap_or("error").to_string();
+        return Err(RpcError { code: e.get("code").and_then(Value::as_i64), message }.into());
     }
     Ok(msg.get("result").cloned().unwrap_or(Value::Null))
 }
@@ -233,9 +260,7 @@ impl Sse {
     async fn open(cfg: &ServerConfig, http: reqwest::Client, creds: Creds) -> Result<Sse> {
         let url = reqwest::Url::parse(cfg.url.trim()).context("invalid URL")?;
         let rb = creds.apply(http.get(url.clone()).header(reqwest::header::ACCEPT, "text/event-stream"));
-        let resp = tokio::time::timeout(INIT_TIMEOUT, rb.send())
-            .await
-            .map_err(|_| anyhow!("no answer within {} s", INIT_TIMEOUT.as_secs()))??;
+        let resp = tokio::time::timeout(INIT_TIMEOUT, rb.send()).await.map_err(|_| Timeout(INIT_TIMEOUT.as_secs()))??;
         let resp = checked(resp).await?;
         if !is_event_stream(&resp) {
             bail!("not an SSE endpoint (no text/event-stream); try the Streamable HTTP transport");
@@ -350,7 +375,7 @@ impl Sse {
                 let cancel = json!({"jsonrpc": "2.0", "method": "notifications/cancelled",
                     "params": {"requestId": id, "reason": "timeout"}});
                 let _ = self.poster.post(&cancel).await;
-                bail!("no answer within {} s", timeout.as_secs())
+                Err(Timeout(timeout.as_secs()).into())
             }
         }
     }
@@ -433,7 +458,7 @@ impl Http {
     async fn post(&self, msg: &Value, timeout: Duration) -> Result<Option<Value>> {
         match tokio::time::timeout(timeout, self.post_inner(msg)).await {
             Ok(r) => r,
-            Err(_) => bail!("no answer within {} s", timeout.as_secs()),
+            Err(_) => Err(Timeout(timeout.as_secs()).into()),
         }
     }
 

@@ -202,6 +202,7 @@ pub fn routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/mcp/servers/:id/oauth/start", post(api::mcp_oauth_start))
         .route("/mcp/servers/:id/oauth/exchange", post(api::mcp_oauth_exchange))
         .route("/mcp/import", post(api::mcp_import))
+        .route("/mcp/usage", get(api::mcp_usage))
         .route("/mcp/clients", get(api::mcp_clients))
         .route("/mcp/clients/:id", delete(api::mcp_client_revoke))
         .route("/logout", post(api::logout))

@@ -260,7 +260,8 @@ impl Sse {
     async fn open(cfg: &ServerConfig, http: reqwest::Client, creds: Creds) -> Result<Sse> {
         let url = reqwest::Url::parse(cfg.url.trim()).context("invalid URL")?;
         let rb = creds.apply(http.get(url.clone()).header(reqwest::header::ACCEPT, "text/event-stream"));
-        let resp = tokio::time::timeout(INIT_TIMEOUT, rb.send()).await.map_err(|_| Timeout(INIT_TIMEOUT.as_secs()))??;
+        let resp =
+            tokio::time::timeout(INIT_TIMEOUT, rb.send()).await.map_err(|_| Timeout(INIT_TIMEOUT.as_secs()))??;
         let resp = checked(resp).await?;
         if !is_event_stream(&resp) {
             bail!("not an SSE endpoint (no text/event-stream); try the Streamable HTTP transport");

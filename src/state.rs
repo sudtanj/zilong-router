@@ -77,7 +77,7 @@ impl AppState {
 }
 
 /// Hourly: WAL checkpoint so the db file stays small on SD cards, drop expired
-/// cooldown locks, and prune usage history older than 180 days.
+/// cooldown locks, and prune usage history (LLM and MCP) older than 180 days.
 pub async fn housekeeping(state: Arc<AppState>) {
     let mut tick = tokio::time::interval(Duration::from_secs(3600));
     tick.tick().await;
@@ -90,6 +90,11 @@ pub async fn housekeeping(state: Arc<AppState>) {
         match state.db.prune_usage(state.cfg.usage_keep_days()) {
             Ok(n) if n > 0 => tracing::info!("pruned {n} old usage rows"),
             Err(e) => tracing::warn!("usage prune failed: {e}"),
+            _ => {}
+        }
+        match state.db.prune_mcp_usage(state.cfg.usage_keep_days()) {
+            Ok(n) if n > 0 => tracing::info!("pruned {n} old MCP usage rows"),
+            Err(e) => tracing::warn!("MCP usage prune failed: {e}"),
             _ => {}
         }
     }

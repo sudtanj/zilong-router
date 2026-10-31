@@ -538,7 +538,7 @@ const mcpStatus = (s) => !s.enabled ? badge('Disabled')
   : s.stats.lastError && s.toolCount == null ? badge('Error', 'error', true)
   : badge('Stopped', '', true);
 pages.mcp = async () => {
-  const d = await get('/mcp/servers');
+  const [d, oc] = await Promise.all([get('/mcp/servers'), get('/mcp/clients').catch(() => ({clients: []}))]);
   mcpCache = d.servers;
   const url = location.origin + '/mcp';
   const claude = `claude mcp add --transport http zilong-router ${url} --header "Authorization: Bearer <api-key>"`;
@@ -552,6 +552,7 @@ pages.mcp = async () => {
       <h2 class="ct mb4">${ms('hub')}Connect your agent</h2>
       <p class="sm muted mb4">One MCP endpoint for every server below. Instead of hundreds of tool definitions the agent gets four meta tools (<code>search_tools</code>, <code>get_tool_schemas</code>, <code>call_tool</code>, <code>list_servers</code>), so its context stays small however many servers you add.</p>
       <div class="col gap2">${copyRow('Meta tools', url)}${copyRow('All tools', url + '/all')}</div>
+      <p class="sm mt2">${ms('login', 16)} Clients that support OAuth (Claude, ChatGPT, Cursor…) can just use this URL and sign in: they ask for the dashboard password and which API key to act as. Claude.ai and ChatGPT connectors need the router on public https (Tailscale Funnel, Cloudflare Tunnel).</p>
       <p class="xs muted mt1"><code>/mcp/all</code> lists every tool directly as <code>server__tool</code> instead. From other machines send an API key from <a href="#/endpoint">Endpoint &amp; Key</a>; a restricted key only reaches the servers on its list as <code>mcp/&lt;server&gt;</code> (or <code>mcp/*</code> for all).</p>
       <p class="sm medium mt4 mb2">Claude Code</p>
       <div class="row"><input class="input mono grow" value="${esc(claude)}" readonly><button class="tiny" data-act="copy" data-text="${esc(claude)}" title="Copy">${ms('content_copy', 18)}</button></div>
@@ -568,7 +569,29 @@ pages.mcp = async () => {
         : `<div class="col">${mcpCache.map(mcpRow).join('')}</div>`}
       <p class="xs muted mt4">Remote servers only (Streamable HTTP or SSE): the router never runs server processes itself. Connections open on first use and ${idle}. Tool lists are cached, so searching does not connect; use ${ms('refresh', 14)} after a server gains tools. Calls and errors also go to the <a href="#/console-log">Console Log</a>.</p>
     </div>
+    <div class="card">
+      <h2 class="ct mb4">${ms('verified_user')}Connected apps</h2>
+      ${oc.clients.length === 0
+        ? `<p class="sm muted">No app has signed in with OAuth yet. Add <code>${esc(url)}</code> as a custom connector (Claude, ChatGPT) or MCP server (Cursor) and approve it with the dashboard password.</p>`
+        : `<div class="col">${oc.clients.map(mcpClientRow).join('')}</div>`}
+      <p class="xs muted mt4">Each app acts as the API key chosen when it was approved and gets that key's restrictions. Revoking an app, or disabling or deleting its key, disconnects it.</p>
+    </div>
   </div>`;
+};
+function mcpClientRow(c) {
+  const key = c.keyName ? `key <span class="mono">${esc(c.keyName)}</span>${c.keyActive ? '' : ' ' + badge('Key disabled', 'warning', true)}` : 'key deleted';
+  return `<div class="keyrow">
+    <div class="grow" style="min-width:0">
+      <div class="row wrap" style="gap:8px"><p class="sm medium">${esc(c.name)}</p>${c.redirect ? `<code>${esc(c.redirect)}</code>` : ''}</div>
+      <p class="xs muted mt1">${key} · connected ${relTime(c.connectedAt).toLowerCase()} · last used ${relTime(c.lastUsed).toLowerCase()}</p>
+    </div>
+    <button class="btn ghost shrink0" data-act="mcpClientRevoke" data-id="${esc(c.id)}" data-name="${esc(c.name)}">${ms('link_off', 18)}Revoke</button>
+  </div>`;
+}
+actions.mcpClientRevoke = async ({id, name}) => {
+  if (await confirmModal({title: 'Revoke app', message: `Disconnect "${name}"? Its tokens stop working at once; it has to sign in again.`, confirmText: 'Revoke'})) {
+    await del('/mcp/clients/' + encodeURIComponent(id)); reload();
+  }
 };
 function mcpAuthLine(s) {
   const a = s.auth;

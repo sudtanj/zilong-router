@@ -2,7 +2,8 @@
 //! mock Streamable HTTP MCP server (sessions, paginated tool lists, SSE answers, an
 //! upstream auth header), a mock server on the older HTTP+SSE transport (an event
 //! stream naming a POST endpoint, answers on the stream), and one behind OAuth (resource
-//! and authorization server metadata, dynamic registration, PKCE, refresh tokens).
+//! and authorization server metadata, dynamic registration, PKCE, refresh tokens). Clients
+//! also sign in to the gateway itself with OAuth (the router as authorization server).
 
 use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
@@ -392,6 +393,7 @@ async fn start_router(name: &str, idle_secs: u64) -> Instance {
     for var in [
         "ZILONG_ROUTER_CONFIG",
         "REQUIRE_API_KEY",
+        "INITIAL_PASSWORD",
         "TURSO_DATABASE_URL",
         "TURSO_AUTH_TOKEN",
         "TURSO_ONLY",
@@ -721,4 +723,168 @@ async fn oauth_servers_sign_in_and_refresh() {
     assert!(server_status(base, "secure").await["auth"].is_null());
     let r = run(base, None, "secure__echo", json!({"text": "x"})).await;
     assert_eq!(r["isError"], true, "{r}");
+}
+
+/// The `value` of the form field `name` in a server-rendered page.
+fn form_value(html: &str, name: &str) -> String {
+    let marker = format!(r#"name="{name}" value=""#);
+    let start = html.find(&marker).unwrap_or_else(|| panic!("no {name} field: {html}")) + marker.len();
+    html[start..].split('"').next().unwrap().to_string()
+}
+
+async fn submit(browser: &reqwest::Client, base: &str, form: &[(&str, &str)]) -> reqwest::Response {
+    browser.post(format!("{base}/oauth/authorize")).form(form).send().await.unwrap()
+}
+
+async fn token(url: &str, form: &[(&str, &str)]) -> (u16, Value) {
+    let resp = reqwest::Client::new().post(url).form(form).send().await.unwrap();
+    (resp.status().as_u16(), resp.json().await.unwrap())
+}
+
+#[tokio::test]
+async fn clients_sign_in_to_the_gateway_with_oauth() {
+    let up = start_upstream(Upstream::default()).await;
+    let router = start_router("oauth-clients", 300).await;
+    let base = router.base.as_str();
+    http_server(base, "a", &up).await;
+    http_server(base, "b", &up).await;
+    let key = admin(reqwest::Method::POST, base, "/keys", Some(json!({"name": "mcp-agent-key"}))).await;
+    let key_id = key["id"].as_str().unwrap().to_string();
+    let restrict = json!({"accessRestricted": true, "accessAllow": ["mcp/a"]});
+    admin(reqwest::Method::PATCH, base, &format!("/keys/{key_id}"), Some(restrict)).await;
+    let password = json!({"current": "123456", "new": "hunter22"});
+    admin(reqwest::Method::POST, base, "/password", Some(password)).await;
+    admin(reqwest::Method::PATCH, base, "/settings", Some(json!({"requireApiKey": true}))).await;
+
+    // No credentials: a 401 pointing at the protected resource metadata.
+    let http = reqwest::Client::new();
+    let list = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"});
+    let resp = http.post(format!("{base}/mcp/all")).json(&list).send().await.unwrap();
+    assert_eq!(resp.status(), 401);
+    let prm_url = format!("{base}/.well-known/oauth-protected-resource/mcp/all");
+    let challenge = resp.headers()[reqwest::header::WWW_AUTHENTICATE].to_str().unwrap().to_string();
+    assert_eq!(challenge, format!(r#"Bearer resource_metadata="{prm_url}""#));
+
+    // Discovery.
+    let prm: Value = http.get(&prm_url).send().await.unwrap().json().await.unwrap();
+    assert_eq!(prm["resource"], format!("{base}/mcp/all"));
+    assert_eq!(prm["authorization_servers"], json!([base]));
+    let meta_url = format!("{base}/.well-known/oauth-authorization-server");
+    let meta: Value = http.get(&meta_url).send().await.unwrap().json().await.unwrap();
+    assert_eq!(meta["issuer"], base);
+    assert_eq!(meta["code_challenge_methods_supported"], json!(["S256"]));
+    let token_url = meta["token_endpoint"].as_str().unwrap().to_string();
+
+    // Dynamic registration.
+    let register = meta["registration_endpoint"].as_str().unwrap();
+    let bad = json!({"client_name": "x", "redirect_uris": ["http://evil.example.com/cb"]});
+    assert_eq!(http.post(register).json(&bad).send().await.unwrap().status(), 400);
+    let redirect = "http://localhost:6274/oauth/callback";
+    let reg = json!({"client_name": "Inspector <test>", "redirect_uris": [redirect]});
+    let resp = http.post(register).json(&reg).send().await.unwrap();
+    assert_eq!(resp.status(), 201);
+    let client: Value = resp.json().await.unwrap();
+    let client_id = client["client_id"].as_str().unwrap().to_string();
+    assert_eq!(client["token_endpoint_auth_method"], "none");
+
+    // The consent page, opened from another machine (through a proxy): password first.
+    let mut remote = reqwest::header::HeaderMap::new();
+    remote.insert("x-forwarded-for", "203.0.113.7".parse().unwrap());
+    let browser =
+        reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).default_headers(remote).build().unwrap();
+    let verifier = "a-verifier-that-is-long-enough-for-pkce-0123456789";
+    let pkce_challenge = b64url(&Sha256::digest(verifier.as_bytes()));
+    let mut authorize_url = reqwest::Url::parse(meta["authorization_endpoint"].as_str().unwrap()).unwrap();
+    authorize_url
+        .query_pairs_mut()
+        .append_pair("response_type", "code")
+        .append_pair("client_id", &client_id)
+        .append_pair("redirect_uri", redirect)
+        .append_pair("code_challenge", &pkce_challenge)
+        .append_pair("code_challenge_method", "S256")
+        .append_pair("state", "st-1")
+        .append_pair("resource", &format!("{base}/mcp/all"));
+    let page = browser.get(authorize_url.as_str()).send().await.unwrap();
+    assert_eq!(page.status(), 200);
+    let html = page.text().await.unwrap();
+    assert!(html.contains("Inspector &lt;test&gt;") && html.contains(r#"name="password""#), "{html}");
+    assert!(!html.contains("mcp-agent-key"), "keys listed before the password: {html}");
+    let request = form_value(&html, "request");
+
+    let wrong = [("request", request.as_str()), ("action", "continue"), ("password", "nope")];
+    let resp = submit(&browser, base, &wrong).await;
+    assert_eq!(resp.status(), 401);
+    assert!(resp.text().await.unwrap().contains("Wrong password"));
+    let right = [("request", request.as_str()), ("action", "continue"), ("password", "hunter22")];
+    let resp = submit(&browser, base, &right).await;
+    assert_eq!(resp.status(), 200);
+    let html = resp.text().await.unwrap();
+    assert!(html.contains("mcp-agent-key (restricted)"), "{html}");
+    assert!(html.contains(&format!(r#"value="{key_id}""#)), "{html}");
+
+    // Approve as the restricted key: back to the client with a code.
+    let approve = [("request", request.as_str()), ("action", "approve"), ("key", key_id.as_str())];
+    let resp = submit(&browser, base, &approve).await;
+    assert_eq!(resp.status(), 303);
+    let location = resp.headers()[reqwest::header::LOCATION].to_str().unwrap().to_string();
+    assert!(location.starts_with(redirect), "{location}");
+    let back: HashMap<String, String> = reqwest::Url::parse(&location).unwrap().query_pairs().into_owned().collect();
+    assert_eq!(back["state"], "st-1");
+    assert_eq!(back["iss"], base);
+    // The answered request cannot be replayed.
+    assert_eq!(submit(&browser, base, &approve).await.status(), 400);
+
+    // The code: once, with the PKCE verifier.
+    let exchange = [
+        ("grant_type", "authorization_code"),
+        ("code", back["code"].as_str()),
+        ("client_id", client_id.as_str()),
+        ("redirect_uri", redirect),
+        ("code_verifier", verifier),
+    ];
+    let (status, tokens) = token(&token_url, &exchange).await;
+    assert_eq!(status, 200, "{tokens}");
+    assert_eq!(tokens["token_type"], "Bearer");
+    let (status, reused) = token(&token_url, &exchange).await;
+    assert_eq!((status, reused["error"].as_str()), (400, Some("invalid_grant")));
+
+    // The token acts as the chosen key: only server `a`, and /v1 too.
+    let access = tokens["access_token"].as_str().unwrap();
+    let flat = rpc(base, "/mcp/all", Some(access), "tools/list", json!({})).await;
+    let names: Vec<&str> =
+        flat["result"]["tools"].as_array().unwrap().iter().filter_map(|t| t["name"].as_str()).collect();
+    assert!(!names.is_empty() && names.iter().all(|n| n.starts_with("a__")), "{names:?}");
+    let r = call(base, "/mcp/all", Some(access), "a__echo", json!({"text": "via oauth"})).await;
+    assert_eq!(first_text(&r), "via oauth");
+    let models = http.get(format!("{base}/v1/models")).bearer_auth(access).send().await.unwrap();
+    assert_eq!(models.status(), 200);
+
+    // Refresh: a new pair, and the old refresh token is spent.
+    let refresh = [
+        ("grant_type", "refresh_token"),
+        ("refresh_token", tokens["refresh_token"].as_str().unwrap()),
+        ("client_id", client_id.as_str()),
+    ];
+    let (status, renewed) = token(&token_url, &refresh).await;
+    assert_eq!(status, 200, "{renewed}");
+    assert_eq!(token(&token_url, &refresh).await.0, 400);
+    let access = renewed["access_token"].as_str().unwrap();
+    let r = run(base, Some(access), "a__echo", json!({"text": "hi"})).await;
+    assert_eq!(first_text(&r), "hi");
+
+    // The dashboard lists the app (without its tokens); revoking it ends them.
+    let clients = admin(reqwest::Method::GET, base, "/mcp/clients", None).await;
+    let app = &clients["clients"][0];
+    assert_eq!(app["name"], "Inspector <test>");
+    assert_eq!(app["keyName"], "mcp-agent-key");
+    assert!(app["lastUsed"].is_string(), "{app}");
+    assert!(!clients.to_string().contains(access), "{clients}");
+    admin(reqwest::Method::DELETE, base, &format!("/mcp/clients/{client_id}"), None).await;
+    let resp = http.post(format!("{base}/mcp")).bearer_auth(access).json(&list).send().await.unwrap();
+    assert_eq!(resp.status(), 401);
+    let challenge = resp.headers()[reqwest::header::WWW_AUTHENTICATE].to_str().unwrap().to_string();
+    assert!(challenge.contains(r#"error="invalid_token""#), "{challenge}");
+    assert!(challenge.ends_with("/.well-known/oauth-protected-resource/mcp\""), "{challenge}");
+    let refresh = [("grant_type", "refresh_token"), ("refresh_token", renewed["refresh_token"].as_str().unwrap())];
+    assert_eq!(token(&token_url, &refresh).await.0, 401);
 }

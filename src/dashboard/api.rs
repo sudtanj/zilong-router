@@ -1069,6 +1069,19 @@ pub async fn mcp_oauth_sign_out(State(state): S, Path(id): Path<String>) -> R {
     Ok(Json(json!({"ok": true})))
 }
 
+/// Applications connected to `/mcp` with OAuth (see `mcp::oauth_server`).
+pub async fn mcp_clients(State(state): S) -> R {
+    Ok(Json(json!({"clients": mcp::oauth_server::connected(&state.db)})))
+}
+
+/// Disconnects an application: forgets it and its tokens.
+pub async fn mcp_client_revoke(State(state): S, Path(id): Path<String>) -> R {
+    if !mcp::oauth_server::revoke(&state.db, &id)? {
+        return Err(not_found());
+    }
+    Ok(Json(json!({"ok": true})))
+}
+
 pub async fn mcp_stop(State(state): S, Path(id): Path<String>) -> R {
     state.mcp.stop(&id).await;
     Ok(Json(json!({"ok": true})))

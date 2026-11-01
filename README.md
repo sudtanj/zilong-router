@@ -279,6 +279,16 @@ If `requireApiKey` is off, loopback clients still need nothing; OAuth is then on
 by clients that reach the router from elsewhere.
 - **Observability**: the page shows each server's state, tool count, calls, errors, the
   last error; every call is logged to the Console Log.
+- **Usage**: every tool call a client makes through `/mcp` or `/mcp/all` is saved in the
+  `mcpUsage` table: time, API key (also when the client signed in with OAuth), server,
+  tool, outcome (`ok`, `tool_error` for an `isError` result, `rpc_error`, `timeout`,
+  `transport`), duration and bytes each way. Meta tool calls (`search_tools`, …) count
+  separately. The **Usage** section of the MCP Gateway page (24h / 7d / 30d) shows totals,
+  error rate, average and p95 latency, per-server, top-tool and per-key tables, the
+  latest calls, and each server's connection (open or not, opens, reconnects); server
+  cards show their calls of the last 24 hours. JSON at
+  `GET /api/admin/mcp/usage?range=24h|7d|30d`. Rows are pruned like LLM usage (180 days,
+  30 with `TURSO_ONLY`) and capped at 100,000; they are not mirrored to Turso.
 - Server definitions live in the `kv` table (scopes `mcpServers` and `mcpTools`), so the
   Turso mirror carries them.
 

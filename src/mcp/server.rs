@@ -10,6 +10,7 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Instant;
 
 use axum::body::Bytes;
 use axum::extract::{ConnectInfo, State};
@@ -19,6 +20,7 @@ use axum::Json;
 use futures_util::future::join_all;
 use serde_json::{json, Value};
 
+use super::usage::{self, Call};
 use super::{params_summary, search, tool_description, tool_name, ServerConfig, SEP};
 use crate::auth::{authenticate, AuthError, Caller};
 use crate::state::AppState;
@@ -232,17 +234,44 @@ impl Ctx<'_> {
             let cfg = self.servers().into_iter().find(|s| s.id == server).ok_or_else(unknown)?;
             return Ok(self.call_upstream(&cfg, tool, args).await);
         }
-        Ok(match name {
+        let started = Instant::now();
+        let out = match name {
             "search_tools" => self.search_tools(&args).await,
             "get_tool_schemas" => self.get_tool_schemas(&args).await,
-            "call_tool" => self.call_tool(&args).await,
+            "call_tool" => match self.call_tool(&args).await {
+                // Recorded as the server's tool call.
+                Ok(upstream) => return Ok(upstream),
+                Err(refused) => refused,
+            },
             "list_servers" => self.list_servers().await,
             _ => return Err(invalid(format!("unknown tool: {name}"))),
-        })
+        };
+        let error = super::tool_error(&out);
+        let status = if error.is_some() { usage::TOOL_ERROR } else { usage::OK };
+        let (request_bytes, response_bytes) = (usage::json_len(&args), usage::json_len(&out));
+        let kind = usage::META;
+        self.record(Call { kind, server: None, tool: name, status, error, started, request_bytes, response_bytes });
+        Ok(out)
+    }
+
+    /// Saves a usage row for this caller.
+    fn record(&self, c: Call<'_>) {
+        let endpoint = match self.mode {
+            Mode::Meta => "/mcp",
+            Mode::All => "/mcp/all",
+        };
+        usage::record(self.state, self.caller, endpoint, c);
     }
 
     async fn call_upstream(&self, cfg: &ServerConfig, tool: &str, args: Value) -> Value {
-        match self.state.mcp.call(self.state, cfg, tool, args).await {
+        let started = Instant::now();
+        let request_bytes = usage::json_len(&args);
+        let result = self.state.mcp.call(self.state, cfg, tool, args).await;
+        let (status, error) = usage::outcome(&result);
+        let response_bytes = result.as_ref().map_or(0, usage::json_len);
+        let (kind, server) = (usage::CALL, Some(cfg.id.as_str()));
+        self.record(Call { kind, server, tool, status, error, started, request_bytes, response_bytes });
+        match result {
             Ok(r) => r,
             Err(e) => text_result(format!("{}{SEP}{tool} failed: {e:#}", cfg.id), true),
         }
@@ -332,23 +361,25 @@ impl Ctx<'_> {
         Ok(entry)
     }
 
-    async fn call_tool(&self, args: &Value) -> Value {
+    /// The server's result (`Ok`), or the gateway's error when the call never reached a
+    /// server (`Err`).
+    async fn call_tool(&self, args: &Value) -> Result<Value, Value> {
         let Some(name) = args.get("tool").and_then(Value::as_str) else {
-            return text_result("tool is required (server__tool, from search_tools)".into(), true);
+            return Err(text_result("tool is required (server__tool, from search_tools)".into(), true));
         };
         let arguments = match args.get("arguments") {
             None | Some(Value::Null) => json!({}),
             // Some models send the arguments as a JSON string.
             Some(Value::String(s)) => match serde_json::from_str::<Value>(s) {
                 Ok(v) if v.is_object() => v,
-                _ => return text_result("arguments must be a JSON object".into(), true),
+                _ => return Err(text_result("arguments must be a JSON object".into(), true)),
             },
             Some(v) if v.is_object() => v.clone(),
-            Some(_) => return text_result("arguments must be a JSON object".into(), true),
+            Some(_) => return Err(text_result("arguments must be a JSON object".into(), true)),
         };
         match self.resolve(name, &self.servers()).await {
-            Ok((cfg, tool)) => self.call_upstream(&cfg, &tool, arguments).await,
-            Err(e) => text_result(e, true),
+            Ok((cfg, tool)) => Ok(self.call_upstream(&cfg, &tool, arguments).await),
+            Err(e) => Err(text_result(e, true)),
         }
     }
 

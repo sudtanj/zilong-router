@@ -15,6 +15,7 @@ pub mod auth;
 pub mod client;
 pub mod oauth_server;
 pub mod server;
+pub mod usage;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -303,6 +304,18 @@ pub fn tool_description(tool: &Value) -> &str {
     tool.get("description").and_then(Value::as_str).unwrap_or_default()
 }
 
+/// The start of the text of a `CallToolResult` marked `isError`; `None` for a success.
+pub fn tool_error(result: &Value) -> Option<String> {
+    if result.get("isError").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    let text = result["content"]
+        .as_array()
+        .and_then(|c| c.iter().find_map(|p| p.get("text").and_then(Value::as_str)))
+        .unwrap_or("tool reported an error");
+    Some(text.chars().take(300).collect())
+}
+
 /// Keyword match over tool names (weighted most), server ids and descriptions; an
 /// empty query lists everything. Best first.
 pub fn search<'a>(catalogs: &'a [(String, Vec<Value>)], query: &str, limit: usize) -> Vec<(&'a str, &'a Value)> {
@@ -423,6 +436,12 @@ pub struct Stats {
     pub total_ms: u64,
     pub last_call_at: Option<String>,
     pub last_error: Option<String>,
+    /// Connections opened since the router started, and how many of them replaced an
+    /// earlier one (closed when idle, or dropped by the server).
+    pub opens: u64,
+    pub reconnects: u64,
+    /// When the latest connection was opened.
+    pub opened_at: Option<String>,
 }
 
 #[derive(Default)]
@@ -476,13 +495,23 @@ impl Gateway {
         let client = match connect(state, cfg, &bearer).await {
             Ok(c) => c,
             Err(e) => {
-                let e = format!("{e:#}");
-                tracing::warn!("mcp {}: cannot start: {e}", cfg.id);
-                self.record(&cfg.id, 0, Some(e.clone()), false);
-                anyhow::bail!(e);
+                let text = format!("{e:#}");
+                tracing::warn!("mcp {}: cannot start: {text}", cfg.id);
+                self.record(&cfg.id, 0, Some(text), false);
+                // The error itself, so usage can tell a timeout from other failures.
+                return Err(e);
             }
         };
         tracing::info!("mcp {}: connected in {} ms", cfg.id, started.elapsed().as_millis());
+        {
+            let mut stats = self.stats.lock();
+            let s = stats.entry(cfg.id.clone()).or_default();
+            if s.opens > 0 {
+                s.reconnects += 1;
+            }
+            s.opens += 1;
+            s.opened_at = Some(now_iso());
+        }
         let live =
             Arc::new(Live { client, bearer, last_used: Mutex::new(Instant::now()), inflight: AtomicUsize::new(0) });
         *guard = Some(live.clone());
@@ -587,14 +616,7 @@ impl Gateway {
         .await;
         let ms = started.elapsed().as_millis() as u64;
         let failed = match &result {
-            Ok(r) if r.get("isError").and_then(Value::as_bool) == Some(true) => {
-                let text = r["content"]
-                    .as_array()
-                    .and_then(|c| c.iter().find_map(|p| p.get("text").and_then(Value::as_str)))
-                    .unwrap_or("tool reported an error");
-                Some(text.chars().take(300).collect::<String>())
-            }
-            Ok(_) => None,
+            Ok(r) => tool_error(r),
             Err(e) => Some(format!("{e:#}")),
         };
         match &failed {

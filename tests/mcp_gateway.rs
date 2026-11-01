@@ -646,6 +646,78 @@ async fn sse_connections_close_when_idle_and_reopen_on_use() {
     assert!(server_status(base, "broken").await["stats"]["lastError"].is_string());
 }
 
+/// The row of a usage breakdown that `pick` selects.
+fn usage_row<'a>(rows: &'a Value, pick: impl Fn(&Value) -> bool) -> &'a Value {
+    rows.as_array().unwrap().iter().find(|&r| pick(r)).unwrap_or_else(|| panic!("no such row in {rows}"))
+}
+
+#[tokio::test]
+async fn usage_is_counted_per_server_tool_and_key() {
+    let up = start_upstream(Upstream::default()).await;
+    let router = start_router("usage", 300).await;
+    let base = router.base.as_str();
+    http_server(base, "web", &up).await;
+    add_server(base, json!({"id": "broken", "url": "http://127.0.0.1:9/mcp"})).await;
+    let key = admin(reqwest::Method::POST, base, "/keys", Some(json!({"name": "agent"}))).await;
+    let (key_id, secret) = (key["id"].as_str().unwrap(), key["key"].as_str().unwrap());
+
+    // With the key: two calls through /mcp (one failing), one through /mcp/all, two meta calls.
+    assert_eq!(first_text(&run(base, Some(secret), "web__add", json!({"a": 1, "b": 2})).await), "3");
+    assert_eq!(run(base, Some(secret), "web__fail", Value::Null).await["isError"], true);
+    assert_eq!(first_text(&call(base, "/mcp/all", Some(secret), "web__echo", json!({"text": "hi"})).await), "hi");
+    call(base, "/mcp", Some(secret), "search_tools", json!({"query": "add", "server": "web"})).await;
+    assert_eq!(run(base, Some(secret), "nope__x", Value::Null).await["isError"], true);
+    // Without a key (loopback): one call through /mcp/all, one to a server that is down.
+    assert_eq!(first_text(&call(base, "/mcp/all", None, "web__add", json!({"a": 2, "b": 2})).await), "4");
+    assert_eq!(run(base, None, "broken__x", Value::Null).await["isError"], true);
+
+    let u = admin(reqwest::Method::GET, base, "/mcp/usage?range=24h", None).await;
+    assert_eq!(u["range"], "24h");
+    let t = &u["totals"];
+    let totals = (t["calls"].as_i64(), t["errors"].as_i64(), t["metaCalls"].as_i64());
+    assert_eq!(totals, (Some(5), Some(2), Some(2)), "{u}");
+    assert!(t["avgMs"].is_i64() && t["p95Ms"].is_i64(), "{t}");
+
+    let web = usage_row(&u["byServer"], |r| r["server"] == "web");
+    assert_eq!((web["calls"].as_i64(), web["errors"].as_i64()), (Some(4), Some(1)), "{web}");
+    assert!(web["requestBytes"].as_i64().unwrap() > 0 && web["responseBytes"].as_i64().unwrap() > 0, "{web}");
+    let broken = usage_row(&u["byServer"], |r| r["server"] == "broken");
+    assert_eq!((broken["calls"].as_i64(), broken["errors"].as_i64()), (Some(1), Some(1)), "{broken}");
+
+    let add = usage_row(&u["byTool"], |r| r["server"] == "web" && r["tool"] == "add");
+    assert_eq!((add["calls"].as_i64(), add["errors"].as_i64()), (Some(2), Some(0)), "{add}");
+    let fail = usage_row(&u["byTool"], |r| r["server"] == "web" && r["tool"] == "fail");
+    assert_eq!((fail["calls"].as_i64(), fail["errors"].as_i64()), (Some(1), Some(1)), "{fail}");
+    assert_eq!(u["byTool"][0]["tool"], "add", "most used first: {u}");
+
+    let agent = usage_row(&u["byKey"], |r| r["apiKeyId"] == key_id);
+    assert_eq!(agent["keyName"], "agent");
+    let counts = (agent["calls"].as_i64(), agent["errors"].as_i64(), agent["metaCalls"].as_i64());
+    assert_eq!(counts, (Some(3), Some(1), Some(2)), "{agent}");
+    let local = usage_row(&u["byKey"], |r| r["apiKeyId"].is_null());
+    assert_eq!(local["keyName"], "local");
+    assert_eq!((local["calls"].as_i64(), local["errors"].as_i64()), (Some(2), Some(1)), "{local}");
+
+    // Latest first, with the outcome of each call.
+    let recent = u["recent"].as_array().unwrap();
+    assert_eq!(recent.len(), 7, "{u}");
+    assert_eq!((&recent[0]["server"], &recent[0]["status"]), (&json!("broken"), &json!("transport")));
+    assert!(recent[0]["error"].is_string(), "{}", recent[0]);
+    let status = |tool: &str| usage_row(&u["recent"], |r| r["tool"] == tool)["status"].clone();
+    assert_eq!(status("fail"), "tool_error");
+    assert_eq!(status("search_tools"), "ok");
+    assert_eq!(status("call_tool"), "tool_error", "an unknown tool never reaches a server");
+    let echo = usage_row(&u["recent"], |r| r["tool"] == "echo");
+    assert_eq!((&echo["endpoint"], &echo["kind"]), (&json!("/mcp/all"), &json!("call")), "{echo}");
+    assert_eq!(echo["keyName"], "agent");
+
+    // Live connection stats, and the 24-hour count on the server card.
+    let conn = usage_row(&u["connections"], |r| r["server"] == "web");
+    assert_eq!((&conn["status"], conn["opens"].as_u64()), (&json!("running"), Some(1)), "{conn}");
+    assert!(conn["openedAt"].is_string(), "{conn}");
+    assert_eq!(server_status(base, "web").await["calls24h"], 4);
+}
+
 #[tokio::test]
 async fn only_remote_servers_are_accepted() {
     let router = start_router("remote-only", 300).await;

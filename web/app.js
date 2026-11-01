@@ -538,7 +538,7 @@ const mcpStatus = (s) => !s.enabled ? badge('Disabled')
   : s.stats.lastError && s.toolCount == null ? badge('Error', 'error', true)
   : badge('Stopped', '', true);
 pages.mcp = async () => {
-  const [d, oc] = await Promise.all([get('/mcp/servers'), get('/mcp/clients').catch(() => ({clients: []}))]);
+  const [d, oc, usage] = await Promise.all([get('/mcp/servers'), get('/mcp/clients').catch(() => ({clients: []})), get('/mcp/usage?range=' + mcpRange).catch(() => null)]);
   mcpCache = d.servers;
   const url = location.origin + '/mcp';
   const claude = `claude mcp add --transport http zilong-router ${url} --header "Authorization: Bearer <api-key>"`;
@@ -569,6 +569,7 @@ pages.mcp = async () => {
         : `<div class="col">${mcpCache.map(mcpRow).join('')}</div>`}
       <p class="xs muted mt4">Remote servers only (Streamable HTTP or SSE): the router never runs server processes itself. Connections open on first use and ${idle}. Tool lists are cached, so searching does not connect; use ${ms('refresh', 14)} after a server gains tools. Calls and errors also go to the <a href="#/console-log">Console Log</a>.</p>
     </div>
+    ${usage ? mcpUsageCard(usage) : ''}
     <div class="card">
       <h2 class="ct mb4">${ms('verified_user')}Connected apps</h2>
       ${oc.clients.length === 0
@@ -607,7 +608,8 @@ function mcpAuthLine(s) {
 function mcpRow(s) {
   const target = s.url;
   const st = s.stats || {};
-  const calls = st.calls ? ` · ${fmt(st.calls)} calls, ${fmt(st.errors)} errors, ${Math.round(st.totalMs / st.calls)} ms avg` : '';
+  const day = s.calls24h != null ? ` · ${plural(s.calls24h, 'call')} (24h)` : '';
+  const calls = day + (st.calls ? ` · ${fmt(st.calls)} calls, ${fmt(st.errors)} errors, ${Math.round(st.totalMs / st.calls)} ms avg since restart` : '');
   const tools = s.toolCount != null ? `<a href="#" data-act="mcpTools" data-id="${esc(s.id)}" style="color:var(--primary)">${s.toolCount} tools</a> · listed ${relTime(s.toolsFetchedAt).toLowerCase()}` : 'Tools not listed yet';
   return `<div class="keyrow ${s.enabled ? '' : 'off'}">
     <div class="grow" style="min-width:0">
@@ -630,6 +632,47 @@ function mcpRow(s) {
     </div>
   </div>`;
 }
+// Usage of the gateway (GET /mcp/usage): tool calls per server, tool and key.
+let mcpRange = '24h';
+const fmtMs = (n) => n == null ? '—' : fmt(n) + ' ms';
+function mcpUsageCard(u) {
+  const t = u.totals;
+  const statCard = (l, v, cls, note) => `<div class="card stat"><span class="l">${l}</span><span class="v ${cls || ''}" title="${esc(v)}">${v}</span>${note ? `<span class="n">${note}</span>` : ''}</div>`;
+  const table = (title, head, rows, cells, empty) => `<div class="col gap2"><h3 class="sm semibold">${title}</h3><div class="card p0"><div style="overflow-x:auto"><table class="ut"><thead><tr>
+      ${head.map(([l, right]) => `<th${right ? ' class="r"' : ''}>${l}</th>`).join('')}</tr></thead><tbody>
+      ${!rows.length ? `<tr><td colspan="${head.length}" class="center muted" style="padding:24px">${empty}</td></tr>` : rows.map((r) => `<tr>${cells(r).map((c, i) => `<td${head[i][1] ? ' class="r"' : ''}>${c}</td>`).join('')}</tr>`).join('')}
+    </tbody></table></div></div></div>`;
+  const numHead = [['Calls', 1], ['Errors', 1], ['Avg', 1], ['p95', 1], ['Sent / received', 1], ['Last used', 1]];
+  const errors = (n) => n ? `<span class="danger">${fmt(n)}</span>` : '0';
+  const numCells = (r) => [fmt(r.calls), errors(r.errors), fmtMs(r.avgMs), fmtMs(r.p95Ms), `${fmtBytes(r.requestBytes)} / ${fmtBytes(r.responseBytes)}`, `<span class="muted" style="white-space:nowrap">${relTime(r.lastUsed)}</span>`];
+  const conns = Object.fromEntries((u.connections || []).map((c) => [c.server, c]));
+  const connText = (id) => {
+    const c = conns[id];
+    if (!c || !c.opens) return '<span class="muted">not opened</span>';
+    const state = c.status === 'running' ? badge('Open', 'success', true) : badge('Closed');
+    return `${state} <span class="xs muted">opened ${relTime(c.openedAt).toLowerCase()} · ${plural(c.opens, 'open')}, ${plural(c.reconnects, 'reconnect')}</span>`;
+  };
+  const toolName = (r) => r.kind === 'meta' ? `<span class="mono xs">${esc(r.tool)}</span> ${badge('meta')}` : `<span class="mono xs">${esc(r.server)}__${esc(r.tool)}</span>`;
+  const statusBadge = (r) => `<span title="${esc(r.error || '')}">${badge(esc(r.status), r.status === 'ok' ? 'success' : 'error', true)}</span>`;
+  const meta = (u.byMetaTool || []).map((m) => `${esc(m.tool)} ${fmt(m.calls)}`).join(', ');
+  return `<div class="card col gap4">
+    <div class="row between wrap gap2"><h2 class="ct">${ms('bar_chart')}Usage</h2>${segmented([['24h', '24h'], ['7d', '7D'], ['30d', '30D']], mcpRange, 'mcpRange', 'sm')}</div>
+    <div class="stats">
+      ${statCard('Tool Calls', fmt(t.calls))}
+      ${statCard('Error Rate', (t.errorRate * 100).toFixed(1) + '%', t.errors ? 'danger' : 'success', `${fmt(t.errors)} failed`)}
+      ${statCard('Avg Latency', fmtMs(t.avgMs), 'primary')}
+      ${statCard('p95 Latency', fmtMs(t.p95Ms), 'info')}
+      ${statCard('Meta Calls', fmt(t.metaCalls), '', meta ? esc(meta) : 'search_tools, get_tool_schemas, list_servers')}
+    </div>
+    ${table('By server', [['Server'], ['Connection'], ...numHead], u.byServer, (r) => [`<code>${esc(r.server)}</code>`, connText(r.server), ...numCells(r)], 'No tool calls in this period.')}
+    ${table('Top tools', [['Tool'], ...numHead], u.byTool, (r) => [toolName({...r, kind: 'call'}), ...numCells(r)], 'No tool calls in this period.')}
+    ${table('By API key', [['Key'], ['Calls', 1], ['Errors', 1], ['Meta calls', 1], ['Avg', 1], ['Sent / received', 1], ['Last used', 1]], u.byKey, (r) => [r.apiKeyId ? esc(r.keyName || r.apiKeyId) : '<span class="muted">Local (no key)</span>', fmt(r.calls), errors(r.errors), fmt(r.metaCalls), fmtMs(r.avgMs), `${fmtBytes(r.requestBytes)} / ${fmtBytes(r.responseBytes)}`, `<span class="muted" style="white-space:nowrap">${relTime(r.lastUsed)}</span>`], 'No calls in this period.')}
+    ${table('Recent calls', [['Time'], ['Tool'], ['Key'], ['Endpoint'], ['Status'], ['Duration', 1], ['Sent / received', 1]], u.recent, (r) => [`<span class="muted" style="white-space:nowrap" title="${esc(r.timestamp)}">${relTime(r.timestamp)}</span>`, toolName(r), r.apiKeyId ? esc(r.keyName || r.apiKeyId) : '<span class="muted">local</span>', `<span class="mono xs">${esc(r.endpoint || '')}</span>`, statusBadge(r), fmtMs(r.durationMs), `${fmtBytes(r.requestBytes)} / ${fmtBytes(r.responseBytes)}`], 'No calls recorded yet.')}
+    <p class="xs muted">Every <code>tools/call</code> a client makes through <code>/mcp</code> or <code>/mcp/all</code> (and each meta tool call) is counted per server, tool and API key. Errors are failed results (<code>isError</code>), JSON-RPC errors, timeouts and unreachable servers; hover a status for the message. History is pruned with the LLM usage history.</p>
+  </div>`;
+}
+actions.mcpRange = ({v}) => { mcpRange = v; reload(); };
+
 const linesToMap = (text, sep) => Object.fromEntries(text.split('\n').map((l) => l.trim()).filter(Boolean)
   .map((l) => { const i = l.indexOf(sep); return i < 0 ? [l, ''] : [l.slice(0, i).trim(), l.slice(i + 1).trim()]; }));
 const mapToLines = (o, sep) => Object.entries(o || {}).map(([k, v]) => k + sep + v).join('\n');

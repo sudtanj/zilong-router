@@ -981,8 +981,62 @@ fn mcp_tool_rows(tools: &[Value]) -> Vec<Value> {
 }
 
 pub async fn mcp_servers(State(state): S) -> R {
-    let list: Vec<Value> = mcp::servers(&state.db).iter().map(|s| mcp_server_json(&state, s)).collect();
+    let since = period_since("24h").0.unwrap_or_default();
+    let calls = state.db.mcp_calls_by_server(&since)?;
+    let list: Vec<Value> = mcp::servers(&state.db)
+        .iter()
+        .map(|s| {
+            let mut v = mcp_server_json(&state, s);
+            v["calls24h"] = json!(calls.get(&s.id).copied().unwrap_or(0));
+            v
+        })
+        .collect();
     Ok(Json(json!({"servers": list, "idleSecs": state.cfg.mcp_idle_secs})))
+}
+
+#[derive(Deserialize)]
+pub struct McpUsageQuery {
+    range: Option<String>,
+    period: Option<String>,
+    limit: Option<i64>,
+}
+
+/// Gateway usage over `range` (24h | 7d | 30d, or any period of `/usage`): totals,
+/// per server, top tools, per key, meta tools and the latest calls, plus each server's
+/// live connection.
+pub async fn mcp_usage(State(state): S, Query(q): Query<McpUsageQuery>) -> R {
+    let range = q.range.or(q.period).unwrap_or_else(|| "24h".into());
+    let since = period_since(&range).0.unwrap_or_default();
+    let mut stats = state.db.mcp_usage_stats(&since, 20)?;
+    let keys = state.db.api_keys()?;
+    if let Some(rows) = stats.get_mut("byKey").and_then(Value::as_array_mut) {
+        for r in rows {
+            // The key's current name; the one saved with the calls once it is deleted.
+            let name = r
+                .get("apiKeyId")
+                .and_then(Value::as_str)
+                .and_then(|id| keys.iter().find(|k| k.id == id))
+                .and_then(|k| k.name.clone())
+                .filter(|n| !n.is_empty());
+            if let Some(n) = name {
+                r["keyName"] = json!(n);
+            }
+        }
+    }
+    let connections: Vec<Value> = mcp::servers(&state.db)
+        .iter()
+        .map(|s| {
+            let live = state.mcp.stats(&s.id);
+            json!({
+                "server": s.id, "status": state.mcp.status(&s.id), "openedAt": live.opened_at,
+                "lastUsed": live.last_call_at, "opens": live.opens, "reconnects": live.reconnects,
+            })
+        })
+        .collect();
+    stats["range"] = json!(range);
+    stats["connections"] = json!(connections);
+    stats["recent"] = Value::Array(state.db.mcp_usage_recent(&since, q.limit.unwrap_or(50).clamp(1, 500))?);
+    Ok(Json(stats))
 }
 
 pub async fn mcp_add(State(state): S, Json(mut b): Json<ServerConfig>) -> R {

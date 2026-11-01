@@ -11,6 +11,7 @@ use rusqlite::types::Value as SqlValue;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::path::Path;
 
 pub struct Db {
@@ -84,6 +85,16 @@ pub struct UsageRow {
     pub meta: Value,
 }
 
+/// An integer column, 0 when NULL (a SUM over no rows).
+fn int_at(r: &rusqlite::Row, i: usize) -> rusqlite::Result<i64> {
+    Ok(r.get::<_, Option<i64>>(i)?.unwrap_or(0))
+}
+
+/// An AVG column rounded to an integer, NULL over no rows.
+fn avg_at(r: &rusqlite::Row, i: usize) -> rusqlite::Result<Option<i64>> {
+    Ok(r.get::<_, Option<f64>>(i)?.map(|a| a.round() as i64))
+}
+
 pub fn now_iso() -> String {
     time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap_or_default()
 }
@@ -113,7 +124,35 @@ CREATE TABLE IF NOT EXISTS usageHistory (
 CREATE INDEX IF NOT EXISTS idx_usage_ts ON usageHistory(timestamp);
 CREATE TABLE IF NOT EXISTS usageDaily (dateKey TEXT PRIMARY KEY, data TEXT);
 CREATE TABLE IF NOT EXISTS requestDetails (id TEXT PRIMARY KEY, timestamp TEXT, provider TEXT, model TEXT, connectionId TEXT, status TEXT, data TEXT);
+CREATE TABLE IF NOT EXISTS mcpUsage (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL, kind TEXT NOT NULL, server TEXT, tool TEXT,
+  apiKeyId TEXT, apiKeyName TEXT, endpoint TEXT, status TEXT NOT NULL, error TEXT,
+  durationMs INTEGER NOT NULL DEFAULT 0, requestBytes INTEGER NOT NULL DEFAULT 0, responseBytes INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS idx_mcp_usage_ts ON mcpUsage(timestamp);
 "#;
+
+/// Most `mcpUsage` rows kept, whatever their age (about 20 MB on disk).
+const MCP_USAGE_MAX_ROWS: i64 = 100_000;
+
+/// One tool call through the MCP gateway (`mcpUsage`, ours: 9router has no MCP gateway).
+#[derive(Debug, Clone, Default)]
+pub struct McpUsageRow {
+    pub timestamp: String,
+    /// `call` for a `tools/call` sent to a server, `meta` for a gateway meta tool
+    /// (`search_tools`, ...) answered without one.
+    pub kind: String,
+    pub server: Option<String>,
+    pub tool: String,
+    pub api_key_id: Option<String>,
+    pub api_key_name: String,
+    pub endpoint: String,
+    /// `ok`, `tool_error`, `rpc_error`, `timeout` or `transport`.
+    pub status: String,
+    pub error: Option<String>,
+    pub duration_ms: i64,
+    pub request_bytes: i64,
+    pub response_bytes: i64,
+}
 
 impl Db {
     pub fn open(path: &Path) -> Result<Db> {
@@ -632,5 +671,198 @@ impl Db {
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_default();
         self.with(|c| c.execute("DELETE FROM usageHistory WHERE timestamp < ?1", params![cutoff]))
+    }
+
+    // ----- MCP gateway usage -------------------------------------------------------------
+
+    pub fn insert_mcp_usage(&self, u: &McpUsageRow) -> Result<()> {
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO mcpUsage(timestamp,kind,server,tool,apiKeyId,apiKeyName,endpoint,status,error,durationMs,requestBytes,responseBytes)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+                params![
+                    u.timestamp, u.kind, u.server, u.tool, u.api_key_id, u.api_key_name, u.endpoint, u.status,
+                    u.error, u.duration_ms, u.request_bytes, u.response_bytes
+                ],
+            )
+        })?;
+        Ok(())
+    }
+
+    /// MCP gateway statistics for rows with `timestamp >= since`: totals, per server,
+    /// the `top` tools, per key and per meta tool. Latencies are of upstream calls.
+    pub fn mcp_usage_stats(&self, since: &str, top: i64) -> Result<Value> {
+        self.with(|c| {
+            let calls = "kind = 'call' AND timestamp >= ?1";
+            // Nearest-rank 95th percentile of durationMs per group of `keys` (one group
+            // when empty), keyed by the group's values joined with \u{1}.
+            let p95 = |keys: &[&str]| -> rusqlite::Result<HashMap<String, i64>> {
+                let cols = keys.join(", ");
+                let (sel, part, by) = if keys.is_empty() {
+                    (String::new(), String::new(), String::new())
+                } else {
+                    (format!("{cols}, "), format!("PARTITION BY {cols} "), format!("GROUP BY {cols}"))
+                };
+                let mut st = c.prepare(&format!(
+                    "SELECT {sel}MAX(durationMs) FROM (
+                       SELECT {sel}durationMs, ROW_NUMBER() OVER ({part}ORDER BY durationMs) AS rn, COUNT(*) OVER ({part}) AS n
+                       FROM mcpUsage WHERE {calls})
+                     WHERE rn <= (n * 95 + 99) / 100 {by}"
+                ))?;
+                let n = keys.len();
+                let rows = st.query_map(params![since], |r| {
+                    let k = (0..n)
+                        .map(|i| r.get::<_, Option<String>>(i).map(Option::unwrap_or_default))
+                        .collect::<rusqlite::Result<Vec<_>>>()?;
+                    Ok((k.join("\u{1}"), r.get::<_, Option<i64>>(n)?.unwrap_or(0)))
+                })?;
+                rows.collect()
+            };
+
+            let mut totals = c.query_row(
+                &format!(
+                    "SELECT COUNT(*), SUM(status <> 'ok'), AVG(durationMs), SUM(requestBytes), SUM(responseBytes), MAX(timestamp)
+                     FROM mcpUsage WHERE {calls}"
+                ),
+                params![since],
+                |r| {
+                    let (n, errors) = (int_at(r, 0)?, int_at(r, 1)?);
+                    let rate = if n > 0 { errors as f64 / n as f64 } else { 0.0 };
+                    Ok(json!({
+                        "calls": n, "errors": errors, "errorRate": rate,
+                        "avgMs": avg_at(r, 2)?, "requestBytes": int_at(r, 3)?, "responseBytes": int_at(r, 4)?,
+                        "lastUsed": r.get::<_, Option<String>>(5)?,
+                    }))
+                },
+            )?;
+            let meta: i64 = c.query_row(
+                "SELECT COUNT(*) FROM mcpUsage WHERE kind = 'meta' AND timestamp >= ?1",
+                params![since],
+                |r| r.get(0),
+            )?;
+            let all: &[&str] = &[];
+            totals["p95Ms"] = json!(p95(all)?.get("").copied());
+            totals["metaCalls"] = json!(meta);
+
+            // Upstream calls grouped by server, or by server and tool.
+            let group = |keys: &[&str]| -> rusqlite::Result<Vec<Value>> {
+                let p = p95(keys)?;
+                let cols = keys.join(", ");
+                let mut st = c.prepare(&format!(
+                    "SELECT {cols}, COUNT(*), SUM(status <> 'ok'), AVG(durationMs), SUM(requestBytes), SUM(responseBytes), MAX(timestamp)
+                     FROM mcpUsage WHERE {calls} GROUP BY {cols} ORDER BY COUNT(*) DESC LIMIT ?2"
+                ))?;
+                let n = keys.len();
+                let rows = st.query_map(params![since, top], |r| {
+                    let mut o = serde_json::Map::new();
+                    let mut k = Vec::with_capacity(n);
+                    for (i, key) in keys.iter().enumerate() {
+                        let v = r.get::<_, Option<String>>(i)?;
+                        k.push(v.clone().unwrap_or_default());
+                        o.insert(key.to_string(), json!(v));
+                    }
+                    o.insert("calls".into(), json!(int_at(r, n)?));
+                    o.insert("errors".into(), json!(int_at(r, n + 1)?));
+                    o.insert("avgMs".into(), json!(avg_at(r, n + 2)?));
+                    o.insert("p95Ms".into(), json!(p.get(&k.join("\u{1}")).copied()));
+                    o.insert("requestBytes".into(), json!(int_at(r, n + 3)?));
+                    o.insert("responseBytes".into(), json!(int_at(r, n + 4)?));
+                    o.insert("lastUsed".into(), json!(r.get::<_, Option<String>>(n + 5)?));
+                    Ok(Value::Object(o))
+                })?;
+                rows.collect()
+            };
+
+            let by_key = {
+                let mut st = c.prepare(
+                    "SELECT apiKeyId, MAX(apiKeyName), SUM(kind = 'call'), SUM(kind = 'call' AND status <> 'ok'),
+                            SUM(kind = 'meta'), AVG(CASE WHEN kind = 'call' THEN durationMs END), SUM(requestBytes),
+                            SUM(responseBytes), MAX(timestamp)
+                     FROM mcpUsage WHERE timestamp >= ?1 GROUP BY apiKeyId ORDER BY COUNT(*) DESC LIMIT ?2",
+                )?;
+                let rows = st.query_map(params![since, top], |r| {
+                    Ok(json!({
+                        "apiKeyId": r.get::<_, Option<String>>(0)?, "keyName": r.get::<_, Option<String>>(1)?,
+                        "calls": int_at(r, 2)?, "errors": int_at(r, 3)?, "metaCalls": int_at(r, 4)?,
+                        "avgMs": avg_at(r, 5)?, "requestBytes": int_at(r, 6)?, "responseBytes": int_at(r, 7)?,
+                        "lastUsed": r.get::<_, Option<String>>(8)?,
+                    }))
+                })?;
+                rows.collect::<rusqlite::Result<Vec<Value>>>()?
+            };
+
+            let by_meta = {
+                let mut st = c.prepare(
+                    "SELECT tool, COUNT(*), SUM(status <> 'ok'), MAX(timestamp)
+                     FROM mcpUsage WHERE kind = 'meta' AND timestamp >= ?1 GROUP BY tool ORDER BY COUNT(*) DESC",
+                )?;
+                let rows = st.query_map(params![since], |r| {
+                    Ok(json!({
+                        "tool": r.get::<_, Option<String>>(0)?, "calls": int_at(r, 1)?, "errors": int_at(r, 2)?,
+                        "lastUsed": r.get::<_, Option<String>>(3)?,
+                    }))
+                })?;
+                rows.collect::<rusqlite::Result<Vec<Value>>>()?
+            };
+
+            Ok(json!({
+                "since": since,
+                "totals": totals,
+                "byServer": group(&["server"])?,
+                "byTool": group(&["server", "tool"])?,
+                "byKey": by_key,
+                "byMetaTool": by_meta,
+            }))
+        })
+    }
+
+    /// The latest `limit` gateway calls since `since`, newest first.
+    pub fn mcp_usage_recent(&self, since: &str, limit: i64) -> Result<Vec<Value>> {
+        self.with(|c| {
+            let mut st = c.prepare(
+                "SELECT timestamp, kind, server, tool, apiKeyId, apiKeyName, endpoint, status, error, durationMs,
+                        requestBytes, responseBytes
+                 FROM mcpUsage WHERE timestamp >= ?1 ORDER BY id DESC LIMIT ?2",
+            )?;
+            let rows = st.query_map(params![since, limit], |r| {
+                Ok(json!({
+                    "timestamp": r.get::<_, String>(0)?, "kind": r.get::<_, String>(1)?,
+                    "server": r.get::<_, Option<String>>(2)?, "tool": r.get::<_, Option<String>>(3)?,
+                    "apiKeyId": r.get::<_, Option<String>>(4)?, "keyName": r.get::<_, Option<String>>(5)?,
+                    "endpoint": r.get::<_, Option<String>>(6)?, "status": r.get::<_, String>(7)?,
+                    "error": r.get::<_, Option<String>>(8)?, "durationMs": r.get::<_, i64>(9)?,
+                    "requestBytes": r.get::<_, i64>(10)?, "responseBytes": r.get::<_, i64>(11)?,
+                }))
+            })?;
+            rows.collect()
+        })
+    }
+
+    /// Upstream calls per server since `since` (for the server cards).
+    pub fn mcp_calls_by_server(&self, since: &str) -> Result<HashMap<String, i64>> {
+        self.with(|c| {
+            let mut st = c.prepare(
+                "SELECT server, COUNT(*) FROM mcpUsage WHERE kind = 'call' AND timestamp >= ?1 AND server IS NOT NULL
+                 GROUP BY server",
+            )?;
+            let rows = st.query_map(params![since], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+            rows.collect()
+        })
+    }
+
+    /// Drops gateway calls older than `keep_days`, and the oldest beyond
+    /// [`MCP_USAGE_MAX_ROWS`].
+    pub fn prune_mcp_usage(&self, keep_days: i64) -> Result<usize> {
+        let cutoff = (time::OffsetDateTime::now_utc() - time::Duration::days(keep_days))
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_default();
+        self.with(|c| {
+            let old = c.execute("DELETE FROM mcpUsage WHERE timestamp < ?1", params![cutoff])?;
+            let over = c.execute(
+                "DELETE FROM mcpUsage WHERE id <= (SELECT MAX(id) FROM mcpUsage) - ?1",
+                params![MCP_USAGE_MAX_ROWS],
+            )?;
+            Ok(old + over)
+        })
     }
 }

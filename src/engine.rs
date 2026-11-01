@@ -405,10 +405,8 @@ impl<H: Http + 'static, S: Store + 'static> Engine<H, S> {
         let mut budget = self.limits.max_upstream_calls;
         let candidates = self.auto_list(&snap, &caller, Format::Openai, &[], &mut budget).await;
         let entry = |id: String, owner: &str| json!({"id": id, "object": "model", "created": 0, "owned_by": owner});
-        let mut data: Vec<Value> = ["auto", "auto-strong", "auto-images"]
-            .iter()
-            .map(|id| entry(id.to_string(), "zilong-router"))
-            .collect();
+        let mut data: Vec<Value> =
+            ["auto", "auto-strong", "auto-images"].iter().map(|id| entry(id.to_string(), "zilong-router")).collect();
         let mut seen = HashSet::new();
         for c in candidates {
             let Some(p) = self.registry.get(&c.provider) else { continue };

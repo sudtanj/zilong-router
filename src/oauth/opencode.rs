@@ -504,7 +504,8 @@ mod tests {
 
     #[test]
     fn model_ids_read_the_zen_list() {
-        let v = json!({"data": [{"id": "big-pickle"}, {"id": " beam-free "}, {"id": ""}, "x-free", {"id": "big-pickle"}]});
+        let v =
+            json!({"data": [{"id": "big-pickle"}, {"id": " beam-free "}, {"id": ""}, "x-free", {"id": "big-pickle"}]});
         assert_eq!(model_ids(&v), ["big-pickle", "beam-free", "x-free"]);
         assert!(model_ids(&Value::Null).is_empty());
     }

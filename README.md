@@ -340,7 +340,7 @@ Adding skills:
 
 Limits and storage: names up to 64 characters (the id is the name in lowercase with
 dashes), descriptions up to 1024; text files only (images, fonts, PDFs and other binary
-files are skipped), 1 MB per skill and 50 MB in total; file paths must stay inside the
+files are skipped), 1 MB per skill and 10 MB in total; file paths must stay inside the
 skill folder (no absolute paths, `..`, backslashes or drive letters). Skills live in the
 `kv` table (scope `skills` for the metadata, `skillFiles` for the content), so the Turso
 mirror carries them (the mirror keeps a copy of the `kv` rows in memory to spot changes, so

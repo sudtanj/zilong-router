@@ -14,7 +14,7 @@
 //! Skills live in the `kv` table, so the Turso mirror carries them: scope `skills` holds
 //! the metadata (small, read on every listing), scope `skillFiles` the SKILL.md and the
 //! other files (read only when a skill is loaded). Text files only, 1 MB per skill and
-//! 50 MB in total.
+//! 10 MB in total.
 
 pub mod github;
 
@@ -33,7 +33,7 @@ const FILES_SCOPE: &str = "skillFiles";
 /// Settings key of "Add the skills index to chat requests".
 pub const INDEX_SETTING: &str = "skillsIndexEnabled";
 pub const MAX_SKILL_BYTES: usize = 1024 * 1024;
-pub const MAX_TOTAL_BYTES: usize = 50 * 1024 * 1024;
+pub const MAX_TOTAL_BYTES: usize = 10 * 1024 * 1024;
 const MAX_NAME: usize = 64;
 const MAX_DESCRIPTION: usize = 1024;
 pub const MAIN_FILE: &str = "SKILL.md";
@@ -311,7 +311,7 @@ pub fn store(db: &Db, mut skill: Skill, content: &Content, old: Option<&Skill>) 
     }
     let others: usize = all.iter().filter(|s| s.id != skill.id).map(|s| s.bytes).sum();
     if others + skill.bytes > MAX_TOTAL_BYTES {
-        return Err(format!("skills are limited to 50 MB in total ({} MB are used)", others / (1024 * 1024)));
+        return Err(format!("skills are limited to 10 MB in total ({} MB are used)", others / (1024 * 1024)));
     }
     db.kv_set(FILES_SCOPE, &skill.id, Some(&json!(content))).map_err(|e| format!("{e:#}"))?;
     save_meta(db, &skill).map_err(|e| format!("{e:#}"))?;

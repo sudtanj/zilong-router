@@ -109,7 +109,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/oauth/register", post(register))
         .route("/oauth/authorize", get(authorize_page).post(authorize_submit))
         .route("/oauth/token", post(token_endpoint));
-    for path in ["", "/mcp", "/mcp/all"] {
+    for path in ["", "/mcp", "/mcp/all", "/skills"] {
         r = r
             .route(&format!("/.well-known/oauth-protected-resource{path}"), get(resource_metadata))
             .route(&format!("/.well-known/oauth-authorization-server{path}"), get(server_metadata))

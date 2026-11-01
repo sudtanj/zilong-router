@@ -31,6 +31,9 @@ Orange Pi Zero 3:
   Composio-style meta tools (search, schema, call) so the agent's context holds four tool
   definitions instead of hundreds; Claude, ChatGPT and Cursor connectors sign in to it with
   OAuth. See [MCP gateway](#mcp-gateway).
+- A Skills Gateway: Agent Skills (SKILL.md folders, imported from GitHub, pasted or
+  uploaded) switched on and off in the dashboard and served to every agent through the
+  MCP gateway. See [Skills Gateway](#skills-gateway).
 - A port of the 9router web dashboard, served by the same binary with no Node and no
   build step.
 - Usage and cost per request in SQLite, priced from upstream's pricing table, with
@@ -38,7 +41,7 @@ Orange Pi Zero 3:
 - Provider definitions are **copied from upstream automatically**: a weekly GitHub
   Actions job clones 9router and converts its registry to `data/providers.json`. No
   hand-maintained provider list.
-- <!-- bench:summary -->Small: a 6.9 MiB binary that is ready 14 ms after start and idles at 8.1 MiB RSS; 100 concurrent streaming requests with 32 KiB prompts peak at 43.3 MiB (1 worker thread(s); see [Benchmark](#benchmark)).<!-- /bench:summary -->
+- <!-- bench:summary -->Small: a 7.2 MiB binary that is ready 13 ms after start and idles at 8.2 MiB RSS; 100 concurrent streaming requests with 32 KiB prompts peak at 43.7 MiB (1 worker thread(s); see [Benchmark](#benchmark)).<!-- /bench:summary -->
 
 Not (yet) included: Gemini wire format, model combos, embeddings,
 image/audio, and providers that need IDE-impersonation executors (Cursor, Windsurf, Kiro
@@ -238,6 +241,28 @@ claude mcp add --transport http zilong-router http://<router>:20128/mcp \
   `MCP_IDLE_SECS` (default 300; 0 keeps it open) without calls. Each server's tool list is
   cached in the database, so `search_tools` does not connect; the refresh button (or a
   `tools/list_changed` notification) reloads it.
+- **Nested gateways (Composio)**: a server that is itself a meta-tool gateway is
+  flattened on `/mcp`, so small models don't go through two layers of meta tools.
+  Detected from its tools: Composio (`COMPOSIO_SEARCH_TOOLS` + `COMPOSIO_MULTI_EXECUTE_TOOL`)
+  or a gateway like this one (`search_tools` + `call_tool`). `search_tools` with a query
+  also runs the server's own search (10 s budget; Composio's session id is reused for
+  30 min per API key) and returns its apps' tools as `<server>__<SLUG>` with their
+  parameters, plus short `notes` (toolkits to connect with
+  `<server>__COMPOSIO_MANAGE_CONNECTIONS`). `get_tool_schemas` and `call_tool` work on
+  those names directly; a call runs `COMPOSIO_MULTI_EXECUTE_TOOL` for that one tool, the
+  per-tool wrapper is removed from the answer, and usage is counted under the app tool's
+  name. The upstream's search, schema and execute tools are hidden from search results.
+  `/mcp/all` is unchanged. Turn it off per server with **Nested gateway: Off**.
+- **Direct servers first, nested gateway as fallback**: when you also have a server of
+  its own for a service (a `github` server next to Composio's `github` toolkit; matched
+  by id or name, or by the server's **Service** setting), its tools rank above the nested
+  gateway's, which come back marked `fallback`. If that server cannot be used (sign-in
+  needed, cannot connect, disabled), the nested tools rank first instead. When a call to
+  it fails for infrastructure reasons (unreachable, HTTP 5xx, timeout, 401/403, sign-in,
+  disabled; not tool errors), the gateway searches the nested gateway for the same tool:
+  if the arguments fit the found tool's schema it runs it and says so in a first text
+  block, otherwise it answers with the nested tool's name and parameters. Both attempts
+  are counted in the usage.
 - **Access**: the API keys of `/v1`, with the same rules (loopback clients need no key
   unless `requireApiKey` is set). A restricted key reaches only the servers on its allow
   list as `mcp/<server id>`, or all of them with `mcp/*`. Clients can also sign in with
@@ -279,8 +304,76 @@ If `requireApiKey` is off, loopback clients still need nothing; OAuth is then on
 by clients that reach the router from elsewhere.
 - **Observability**: the page shows each server's state, tool count, calls, errors, the
   last error; every call is logged to the Console Log.
+- **Usage**: every tool call a client makes through `/mcp` or `/mcp/all` is saved in the
+  `mcpUsage` table: time, API key (also when the client signed in with OAuth), server,
+  tool, outcome (`ok`, `tool_error` for an `isError` result, `rpc_error`, `timeout`,
+  `transport`), duration and bytes each way. Meta tool calls (`search_tools`, …) count
+  separately. The **Usage** section of the MCP Gateway page (24h / 7d / 30d) shows totals,
+  error rate, average and p95 latency, per-server, top-tool and per-key tables, the
+  latest calls, and each server's connection (open or not, opens, reconnects); server
+  cards show their calls of the last 24 hours. JSON at
+  `GET /api/admin/mcp/usage?range=24h|7d|30d`. Rows are pruned like LLM usage (180 days,
+  30 with `TURSO_ONLY`) and capped at 100,000; they are not mirrored to Turso.
 - Server definitions live in the `kv` table (scopes `mcpServers` and `mcpTools`), so the
   Turso mirror carries them.
+
+## Skills Gateway
+
+One place for [Agent Skills](https://github.com/anthropics/skills): folders with a
+`SKILL.md` (YAML frontmatter with a `name` and a `description`, then instructions) and
+optional scripts, references and templates. Add them on the dashboard's **Skills Gateway**
+page and switch each one on or off, like the Token Saver features. Every client of the
+router then gets the enabled skills through one gateway:
+
+- **MCP** (`/mcp` and `/mcp/all`): once a skill is enabled, three more tools appear next
+  to the meta tools. `/skills` is the same endpoint with only these three tools.
+
+  | Tool | What it does |
+  |---|---|
+  | `list_skills` | Name and description of each enabled skill. |
+  | `load_skill` | `name`: the skill's SKILL.md (without the frontmatter) and the list of its other files. |
+  | `read_skill_file` | `name`, `path`: one file of the skill, e.g. `scripts/fill.py` (or `SKILL.md`). |
+
+  Progressive disclosure, as in Claude's own skills: the `initialize` instructions name
+  the enabled skills with a short description and tell the agent to load one before a
+  task it covers; the body is only read when needed. Enabled skills are also MCP prompts
+  (`prompts/list`, `prompts/get`). Skill calls are counted in the MCP usage as meta calls.
+  The router never runs a skill's scripts; agents read them and run them where they work.
+- **Skills index in chat requests** (`skillsIndexEnabled`, off by default): for agents
+  that do not read MCP instructions, `/v1/chat/completions`, `/v1/messages` and
+  `/v1/responses` requests get a compact system-prompt block listing the enabled skills
+  (name and description) and saying to load one with the zilong-router MCP `load_skill`
+  tool. The header `x-9router-token-saver: off` skips it for one request.
+
+Adding skills:
+
+- **Import from GitHub**: a repository URL (`https://github.com/anthropics/skills`), or a
+  folder in it (`…/tree/main/skills`), with an optional branch, tag or commit and folder.
+  The git trees API lists the repository in one request; every folder holding a SKILL.md
+  is offered in a checklist, and the picked ones are downloaded from
+  raw.githubusercontent.com. **Update** fetches a GitHub skill again (its switch is kept).
+  Set `GITHUB_TOKEN` in the router's environment for private repositories or a higher
+  API rate limit.
+- **Paste a SKILL.md**: a single-file skill (name and description can be typed in when
+  the text has no frontmatter).
+- **Upload a folder** from the browser: every SKILL.md in it starts a skill. There is no
+  `.zip` upload (it would need a zip library in the binary); unpack the archive and
+  upload the folder instead.
+
+Limits and storage: names up to 64 characters (the id is the name in lowercase with
+dashes), descriptions up to 1024; text files only (images, fonts, PDFs and other binary
+files are skipped), 1 MB per skill and 10 MB in total; file paths must stay inside the
+skill folder (no absolute paths, `..`, backslashes or drive letters). Skills live in the
+`kv` table (scope `skills` for the metadata, `skillFiles` for the content), so the Turso
+mirror carries them (the mirror keeps a copy of the `kv` rows in memory to spot changes, so
+size the collection for the board). Every API key reaches every enabled skill; per-key restrictions only
+apply to MCP servers.
+
+Admin API (`/api/admin`): `GET /skills`, `POST /skills` (`{skillMd, name?, description?,
+files?}`), `GET|PATCH|DELETE /skills/:id` (`{enabled?, name?, description?}`),
+`POST /skills/:id/update`, `POST /skills/import/github/preview` and
+`POST /skills/import/github` (`{url, ref?, path?, dirs}`); the index switch is the
+`skillsIndexEnabled` setting (`PATCH /settings`).
 
 ## Dashboard
 
@@ -310,6 +403,9 @@ Pages, matching upstream's sidebar:
 - **Usage**: Today / 24h / 7D / 30D / 60D / All periods, overview cards, providers and
   recent requests, tokens / requests / cost chart, provider and model breakdowns, and
   the grouped, sortable table by model, account, API key or endpoint in costs or tokens.
+- **Skills Gateway**: add Agent Skills (GitHub import with a checklist, paste, folder
+  upload), switch each on or off, view, edit, update from GitHub or delete them, and the
+  *Add the skills index to chat requests* switch. See [Skills Gateway](#skills-gateway).
 - **Console Log** (Debug): the last 200 lines of the router log, refreshed every 1.5s
   (polled rather than upstream's SSE stream), coloured by level, with *Clear*. Every
   answered request is logged as `endpoint provider/model via account -> status in Nms`.
@@ -329,8 +425,8 @@ Pages, matching upstream's sidebar:
 
 Upstream features that zilong-router does not implement are left out of the sidebar
 rather than shown dead: Combos, Quota Tracker, Token Saver, CLI Tools, Media
-Providers, Proxy Pools, Skills, tunnels and SSO. Model aliases are managed with the
-CLI (`zilong-router alias`).
+Providers, Proxy Pools, tunnels and SSO (upstream's Skills page is replaced by the Skills
+Gateway). Model aliases are managed with the CLI (`zilong-router alias`).
 
 Fonts and icons (Inter and Material Symbols) load from Google Fonts like upstream;
 without internet the UI falls back to system fonts and shows icon names as text.
@@ -447,25 +543,25 @@ are bounded by concurrency, not by the router. Expect the Orange Pi's slower cor
 latency under load; memory carries over.
 
 <!-- bench:report -->
-Measured 2026-10-31 on aarch64 at commit `eaab0a6`. Binary 6.9 MiB. The mock upstream streams 8 chunks 25 ms apart (about 200 ms per request); every request carries a 32 KiB system prompt; requests rotate between OpenAI JSON, OpenAI streaming and Anthropic Messages streaming, and each is logged to SQLite.
+Measured 2026-11-01 on aarch64 at commit `48880e8`. Binary 7.2 MiB. The mock upstream streams 8 chunks 25 ms apart (about 200 ms per request); every request carries a 32 KiB system prompt; requests rotate between OpenAI JSON, OpenAI streaming and Anthropic Messages streaming, and each is logged to SQLite.
 
 ### 1 worker thread(s)
 
-Ready 14 ms after spawn.
+Ready 13 ms after spawn.
 
 | State | RSS | Threads |
 |---|---:|---:|
-| Idle, 2 s after start | 8.1 MiB | 2 |
-| Idle after 30 sequential requests | 8.9 MiB | 2 |
-| Idle, 5 s after the load runs | 42.6 MiB | 2 |
-| Peak for the whole run (VmHWM) | 42.8 MiB | |
+| Idle, 2 s after start | 8.2 MiB | 2 |
+| Idle after 30 sequential requests | 9.3 MiB | 2 |
+| Idle, 5 s after the load runs | 43.7 MiB | 2 |
+| Peak for the whole run (VmHWM) | 43.7 MiB | |
 
 | Concurrency | Requests | Errors | Req/s | p50 | p99 | Peak RSS |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1 | 30 | 0 | 5 | 209 ms | 211 ms | 9.0 MiB |
-| 10 | 1000 | 0 | 48 | 209 ms | 218 ms | 12.7 MiB |
-| 50 | 1000 | 0 | 234 | 210 ms | 240 ms | 26.2 MiB |
-| 100 | 1000 | 0 | 444 | 210 ms | 289 ms | 43.3 MiB |
+| 1 | 30 | 0 | 5 | 210 ms | 212 ms | 9.3 MiB |
+| 10 | 1000 | 0 | 47 | 210 ms | 245 ms | 13.4 MiB |
+| 50 | 1000 | 0 | 232 | 210 ms | 245 ms | 26.0 MiB |
+| 100 | 1000 | 0 | 441 | 212 ms | 292 ms | 43.7 MiB |
 
 ### 2 worker thread(s)
 
@@ -473,17 +569,17 @@ Ready 13 ms after spawn.
 
 | State | RSS | Threads |
 |---|---:|---:|
-| Idle, 2 s after start | 8.1 MiB | 3 |
-| Idle after 30 sequential requests | 9.2 MiB | 3 |
-| Idle, 5 s after the load runs | 41.5 MiB | 3 |
-| Peak for the whole run (VmHWM) | 42.0 MiB | |
+| Idle, 2 s after start | 8.3 MiB | 3 |
+| Idle after 30 sequential requests | 9.6 MiB | 3 |
+| Idle, 5 s after the load runs | 41.9 MiB | 3 |
+| Peak for the whole run (VmHWM) | 43.9 MiB | |
 
 | Concurrency | Requests | Errors | Req/s | p50 | p99 | Peak RSS |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1 | 30 | 0 | 5 | 210 ms | 213 ms | 9.4 MiB |
-| 10 | 1000 | 0 | 48 | 209 ms | 217 ms | 12.9 MiB |
-| 50 | 1000 | 0 | 234 | 210 ms | 229 ms | 26.1 MiB |
-| 100 | 1000 | 0 | 454 | 210 ms | 257 ms | 42.3 MiB |
+| 1 | 30 | 0 | 5 | 210 ms | 211 ms | 9.7 MiB |
+| 10 | 1000 | 0 | 47 | 210 ms | 244 ms | 13.6 MiB |
+| 50 | 1000 | 0 | 234 | 210 ms | 230 ms | 25.5 MiB |
+| 100 | 1000 | 0 | 449 | 212 ms | 272 ms | 44.1 MiB |
 <!-- /bench:report -->
 
 Memory stays near the peak after a burst because the allocator keeps freed pages for reuse.
@@ -532,7 +628,7 @@ opens, and every sync interval (plus once on clean shutdown) pushes changes back
 
 Planned, roughly in order of interest. Nothing here is implemented yet.
 
-- MCP gateway: resources and prompts next to tools.
+- MCP gateway: resources next to tools and prompts.
 - Gemini wire format (`/v1beta/models/...:generateContent`).
 - Model combos (one name that falls back through a list of provider/model pairs).
 - Embeddings, image and audio endpoints.

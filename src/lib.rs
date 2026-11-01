@@ -50,6 +50,8 @@ pub mod icons;
 #[cfg(feature = "native")]
 pub mod mcp;
 #[cfg(feature = "native")]
+pub mod skills;
+#[cfg(feature = "native")]
 pub mod state;
 #[cfg(feature = "native")]
 pub mod turso;

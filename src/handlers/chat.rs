@@ -337,8 +337,12 @@ async fn attempt(
     if upstream_stream && target == Format::Openai && upstream_body.get("stream_options").is_none() {
         upstream_body["stream_options"] = json!({"include_usage": true});
     }
-    let saver = crate::token_saver::Options::from_settings(&state.db.settings(), headers);
+    let settings = state.db.settings();
+    let saver = crate::token_saver::Options::from_settings(&settings, headers);
     crate::token_saver::apply(&mut upstream_body, target, &saver);
+    if !crate::token_saver::opted_out(headers) {
+        crate::skills::inject_index(&settings, &state.db, &mut upstream_body, target);
+    }
 
     let mut exclude: HashSet<String> = HashSet::new();
     let mut last_err: Option<(u16, String)> = None;

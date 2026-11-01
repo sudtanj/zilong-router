@@ -5,15 +5,23 @@
 //! A single connection behind a mutex is enough here: every query is sub-millisecond
 //! and the box serves one developer, not a fleet.
 
+#[cfg(feature = "native")]
 use anyhow::{Context, Result};
+#[cfg(feature = "native")]
 use parking_lot::Mutex;
+#[cfg(feature = "native")]
 use rusqlite::types::Value as SqlValue;
+#[cfg(feature = "native")]
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+#[cfg(feature = "native")]
 use std::collections::HashMap;
+#[cfg(feature = "native")]
 use std::path::Path;
 
+/// The SQLite store of the binary (`native`). Other hosts implement `host::Store`.
+#[cfg(feature = "native")]
 pub struct Db {
     conn: Mutex<Connection>,
 }
@@ -86,17 +94,45 @@ pub struct UsageRow {
 }
 
 /// An integer column, 0 when NULL (a SUM over no rows).
+#[cfg(feature = "native")]
 fn int_at(r: &rusqlite::Row, i: usize) -> rusqlite::Result<i64> {
     Ok(r.get::<_, Option<i64>>(i)?.unwrap_or(0))
 }
 
 /// An AVG column rounded to an integer, NULL over no rows.
+#[cfg(feature = "native")]
 fn avg_at(r: &rusqlite::Row, i: usize) -> rusqlite::Result<Option<i64>> {
     Ok(r.get::<_, Option<f64>>(i)?.map(|a| a.round() as i64))
 }
 
 pub fn now_iso() -> String {
     time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap_or_default()
+}
+
+/// Settings every install starts from; stored keys override them one by one.
+pub fn default_settings() -> Value {
+    json!({
+        "requireLogin": false,
+        "requireApiKey": false,
+        "fallbackStrategy": "fill-first",
+        "stickyRoundRobinLimit": 3,
+        "providerStrategies": {},
+        "providerOverrides": {},
+        "pricing": {},
+        "rtkEnabled": false,
+    })
+}
+
+/// `default_settings()` with the stored JSON object's keys laid over it (what
+/// `Db::settings` returns).
+pub fn merge_settings(stored: Option<Value>) -> Value {
+    let mut base = default_settings();
+    if let Some(Value::Object(m)) = stored {
+        for (k, v) in m {
+            base[k] = v;
+        }
+    }
+    base
 }
 
 pub const SCHEMA: &str = r#"
@@ -132,6 +168,7 @@ CREATE INDEX IF NOT EXISTS idx_mcp_usage_ts ON mcpUsage(timestamp);
 "#;
 
 /// Most `mcpUsage` rows kept, whatever their age (about 20 MB on disk).
+#[cfg(feature = "native")]
 const MCP_USAGE_MAX_ROWS: i64 = 100_000;
 
 /// One tool call through the MCP gateway (`mcpUsage`, ours: 9router has no MCP gateway).
@@ -154,6 +191,7 @@ pub struct McpUsageRow {
     pub response_bytes: i64,
 }
 
+#[cfg(feature = "native")]
 impl Db {
     pub fn open(path: &Path) -> Result<Db> {
         let conn = Connection::open(path).with_context(|| format!("opening {}", path.display()))?;
@@ -243,16 +281,7 @@ impl Db {
     // ----- settings ------------------------------------------------------------
 
     pub fn default_settings() -> Value {
-        json!({
-            "requireLogin": false,
-            "requireApiKey": false,
-            "fallbackStrategy": "fill-first",
-            "stickyRoundRobinLimit": 3,
-            "providerStrategies": {},
-            "providerOverrides": {},
-            "pricing": {},
-            "rtkEnabled": false,
-        })
+        default_settings()
     }
 
     pub fn settings(&self) -> Value {

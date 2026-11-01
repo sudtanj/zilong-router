@@ -258,7 +258,7 @@ pub fn apply(state: &AppState, p: &Value, o: &Options) -> Result<Value> {
     let mut custom: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for m in list(p, "customModels") {
         // Embedding / image / TTS models have no use here.
-        if m.get("type").and_then(Value::as_str).map_or(false, |t| t != "llm") {
+        if m.get("type").and_then(Value::as_str).is_some_and(|t| t != "llm") {
             continue;
         }
         let (Some(owner), Some(id)) =

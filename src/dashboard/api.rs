@@ -662,7 +662,7 @@ pub async fn patch_settings(State(state): S, Json(mut patch): Json<Value>) -> R 
     use crate::token_saver::prompts::{CAVEMAN_LEVELS, PONYTAIL_LEVELS};
     for (key, levels) in [("cavemanLevel", CAVEMAN_LEVELS), ("ponytailLevel", PONYTAIL_LEVELS)] {
         if let Some(v) = o.get(key) {
-            if !v.as_str().map_or(false, |s| levels.contains(&s)) {
+            if !v.as_str().is_some_and(|s| levels.contains(&s)) {
                 return Err(bad(format!("{key} must be one of {}", levels.join(", "))));
             }
         }

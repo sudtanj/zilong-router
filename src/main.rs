@@ -4,30 +4,6 @@
 //! with multi-account fallback, cooldowns, usage accounting and an embedded dashboard.
 //! Designed to idle in ~10 MB of RSS on a 1 GB ARM board.
 
-mod auth;
-mod cli;
-mod config;
-mod console_log;
-mod dashboard;
-mod db;
-mod discovery;
-mod executor;
-mod handlers;
-mod icons;
-mod mcp;
-mod model;
-mod oauth;
-mod pricing;
-mod providers;
-mod router;
-mod skills;
-mod sse;
-mod state;
-mod token_saver;
-mod translator;
-mod turso;
-mod usage;
-
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -35,8 +11,9 @@ use axum::Router;
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
-use crate::config::Config;
-use crate::state::AppState;
+use zilong_router::config::Config;
+use zilong_router::state::AppState;
+use zilong_router::{cli, console_log, handlers, mcp, state, turso};
 
 fn main() -> anyhow::Result<()> {
     let cli = cli::Cli::parse();

@@ -5,16 +5,23 @@
 
 use std::net::IpAddr;
 
-use axum::http::HeaderMap;
+#[cfg(feature = "native")]
 use hmac::{Hmac, Mac};
+use http::HeaderMap;
+#[cfg(feature = "native")]
 use rand::{distributions::Alphanumeric, Rng};
+#[cfg(feature = "native")]
 use sha2::{Digest, Sha256};
 
+#[cfg(feature = "native")]
 use crate::config::Config;
-use crate::db::{ApiKey, Db};
+use crate::db::ApiKey;
+#[cfg(feature = "native")]
+use crate::db::Db;
 
 /// Stable per-install id: sha256(raw + salt)[..16]. The raw id is /etc/machine-id when
 /// readable, else a random value persisted under the data dir.
+#[cfg(feature = "native")]
 pub fn machine_id(cfg: &Config) -> String {
     let raw = std::fs::read_to_string("/etc/machine-id")
         .ok()
@@ -34,10 +41,12 @@ pub fn machine_id(cfg: &Config) -> String {
     hex(&digest)[..16].to_string()
 }
 
+#[cfg(feature = "native")]
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+#[cfg(feature = "native")]
 pub fn generate_key(cfg: &Config, machine_id: &str) -> String {
     let key_id: String = rand::thread_rng()
         .sample_iter(&Alphanumeric)
@@ -51,6 +60,7 @@ pub fn generate_key(cfg: &Config, machine_id: &str) -> String {
     format!("sk-{machine_id}-{key_id}-{crc}")
 }
 
+#[cfg(feature = "native")]
 pub fn create_key(cfg: &Config, db: &Db, name: Option<String>) -> anyhow::Result<ApiKey> {
     let mid = machine_id(cfg);
     let k = ApiKey {
@@ -142,6 +152,7 @@ pub enum AuthError {
     Invalid,
 }
 
+#[cfg(feature = "native")]
 pub fn authenticate(
     cfg: &Config,
     db: &Db,
@@ -168,7 +179,7 @@ pub fn authenticate(
     Err(AuthError::Missing)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use super::*;
     use clap::Parser;

@@ -9,12 +9,14 @@
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use axum::http::HeaderMap;
+use http::HeaderMap;
 use parking_lot::Mutex;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+// `std::time` on native, the JS clock on wasm (where `std::time::Instant::now` panics).
+use web_time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::providers::{Format, Provider, Transport};
 
@@ -153,6 +155,20 @@ pub fn free_models(ids: Vec<String>) -> Vec<String> {
         .collect()
 }
 
+/// Model ids of a `/zen/v1/models` answer (`{"data": [{"id": …}]}`), at most 200, for
+/// hosts without the binary's discovery module.
+pub fn model_ids(v: &Value) -> Vec<String> {
+    let items = v.get("data").or_else(|| v.get("models")).and_then(Value::as_array);
+    let mut out: Vec<String> = Vec::new();
+    for item in items.into_iter().flatten().take(200) {
+        let id = item.as_str().or_else(|| item.get("id").and_then(Value::as_str)).map(str::trim);
+        if let Some(id) = id.filter(|s| !s.is_empty() && !out.iter().any(|m| m == s)) {
+            out.push(id.to_string());
+        }
+    }
+    out
+}
+
 /// The live free list followed by documented free models it lacks.
 pub fn with_documented(mut live: Vec<String>) -> Vec<String> {
     for id in DOCUMENTED_FREE {
@@ -251,7 +267,7 @@ fn descending_hex(time: u64, counter: u64) -> String {
 static COUNTER: LazyLock<Mutex<(u64, u64)>> = LazyLock::new(|| Mutex::new((0, 0)));
 
 fn new_session_id() -> String {
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
     let counter = {
         let mut c = COUNTER.lock();
         if c.0 != now {
@@ -484,6 +500,14 @@ mod tests {
         // the order of the live list is kept.
         assert_eq!(free_models(live), ["big-pickle", "minimax-m3-free", "glm-5.3-flash-free"]);
         assert!(free_models(Vec::new()).is_empty());
+    }
+
+    #[test]
+    fn model_ids_read_the_zen_list() {
+        let v =
+            json!({"data": [{"id": "big-pickle"}, {"id": " beam-free "}, {"id": ""}, "x-free", {"id": "big-pickle"}]});
+        assert_eq!(model_ids(&v), ["big-pickle", "beam-free", "x-free"]);
+        assert!(model_ids(&Value::Null).is_empty());
     }
 
     #[test]

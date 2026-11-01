@@ -73,9 +73,15 @@ type Filter = (&'static str, fn(&str) -> String);
 /// (`tool_result` blocks; error results are left alone) and Responses
 /// (`function_call_output`).
 pub fn compress_messages(body: &mut Value) -> Stats {
+    compress_messages_max(body, RAW_CAP)
+}
+
+/// [`compress_messages`], leaving tool outputs over `max` bytes as they are, for hosts
+/// with a small CPU budget per request (a Cloudflare Worker).
+pub fn compress_messages_max(body: &mut Value, max: usize) -> Stats {
     let mut stats = Stats::default();
     let items = match body.as_object_mut() {
-        Some(o) if o.get("messages").map_or(false, Value::is_array) => o.get_mut("messages"),
+        Some(o) if o.get("messages").is_some_and(Value::is_array) => o.get_mut("messages"),
         Some(o) => o.get_mut("input"),
         None => None,
     };
@@ -84,11 +90,11 @@ pub fn compress_messages(body: &mut Value) -> Stats {
         let Some(m) = msg.as_object_mut() else { continue };
         if m.get("type").and_then(Value::as_str) == Some("function_call_output") {
             match m.get_mut("output") {
-                Some(Value::String(s)) => compress_string(s, &mut stats),
+                Some(Value::String(s)) => compress_string(s, &mut stats, max),
                 Some(Value::Array(parts)) => {
                     for p in parts {
                         if p.get("type").and_then(Value::as_str) == Some("input_text") {
-                            compress_text_field(p, &mut stats);
+                            compress_text_field(p, &mut stats, max);
                         }
                     }
                 }
@@ -98,11 +104,11 @@ pub fn compress_messages(body: &mut Value) -> Stats {
         }
         let is_tool = m.get("role").and_then(Value::as_str) == Some("tool");
         match m.get_mut("content") {
-            Some(Value::String(s)) if is_tool => compress_string(s, &mut stats),
+            Some(Value::String(s)) if is_tool => compress_string(s, &mut stats, max),
             Some(Value::Array(parts)) if is_tool => {
                 for p in parts {
                     if p.get("type").and_then(Value::as_str) == Some("text") {
-                        compress_text_field(p, &mut stats);
+                        compress_text_field(p, &mut stats, max);
                     }
                 }
             }
@@ -114,11 +120,11 @@ pub fn compress_messages(body: &mut Value) -> Stats {
                         continue;
                     }
                     match b.get_mut("content") {
-                        Some(Value::String(s)) => compress_string(s, &mut stats),
+                        Some(Value::String(s)) => compress_string(s, &mut stats, max),
                         Some(Value::Array(parts)) => {
                             for p in parts {
                                 if p.get("type").and_then(Value::as_str) == Some("text") {
-                                    compress_text_field(p, &mut stats);
+                                    compress_text_field(p, &mut stats, max);
                                 }
                             }
                         }
@@ -132,20 +138,25 @@ pub fn compress_messages(body: &mut Value) -> Stats {
     stats
 }
 
-fn compress_text_field(part: &mut Value, stats: &mut Stats) {
+fn compress_text_field(part: &mut Value, stats: &mut Stats, max: usize) {
     if let Some(Value::String(s)) = part.get_mut("text") {
-        compress_string(s, stats);
+        compress_string(s, stats, max);
     }
 }
 
-fn compress_string(s: &mut String, stats: &mut Stats) {
-    if let Some(out) = compress_text(s, stats) {
+fn compress_string(s: &mut String, stats: &mut Stats, max: usize) {
+    if let Some(out) = compress_text_max(s, stats, max) {
         *s = out;
     }
 }
 
 /// Returns the compressed text, or `None` to keep the original.
 pub fn compress_text(text: &str, stats: &mut Stats) -> Option<String> {
+    compress_text_max(text, stats, RAW_CAP)
+}
+
+/// [`compress_text`], keeping outputs over `max` bytes as they are.
+pub fn compress_text_max(text: &str, stats: &mut Stats, max: usize) -> Option<String> {
     let n = text.len();
     stats.bytes_before += n;
     stats.outputs += 1;
@@ -153,7 +164,7 @@ pub fn compress_text(text: &str, stats: &mut Stats) -> Option<String> {
         stats.bytes_after += n;
         None
     };
-    if !(MIN_COMPRESS_SIZE..=RAW_CAP).contains(&n) {
+    if !(MIN_COMPRESS_SIZE..=RAW_CAP.min(max)).contains(&n) {
         return keep(stats);
     }
     let Some((name, f)) = auto_detect(text) else { return keep(stats) };
@@ -256,7 +267,7 @@ fn hex_run(s: &str, ci: bool) -> Option<usize> {
 fn is_git_log_header_line(l: &str) -> bool {
     let rest = &l[graph_prefix_len(l)..];
     let Some(sha) = rest.strip_prefix("commit ") else { return false };
-    hex_run(sha, false).map_or(false, |n| n == sha.len())
+    hex_run(sha, false).is_some_and(|n| n == sha.len())
 }
 
 fn is_build_line(l: &str) -> bool {
@@ -323,7 +334,7 @@ fn is_path_like(l: &str) -> bool {
 }
 
 fn is_ls_total(l: &str) -> bool {
-    l.strip_prefix("total ").map_or(false, |r| !r.is_empty() && r.bytes().all(|b| b.is_ascii_digit()))
+    l.strip_prefix("total ").is_some_and(|r| !r.is_empty() && r.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// `^[-dlbcps][rwx-]{9}`
@@ -468,8 +479,7 @@ fn git_log(input: &str) -> String {
         let commit_hdr = {
             let g = graph_prefix_len(&lower);
             let rest = &lower[g..];
-            rest.strip_prefix("commit ").and_then(|sha| hex_run(sha, false).map(|n| (n, sha.len()))).map_or(
-                false,
+            rest.strip_prefix("commit ").and_then(|sha| hex_run(sha, false).map(|n| (n, sha.len()))).is_some_and(
                 |(n, len)| {
                     // `^commit <sha>$` without decoration; any tail is fine after decoration.
                     g > 0 || n == len
@@ -563,8 +573,8 @@ fn git_status(input: &str) -> String {
                 continue;
             }
         }
-        if raw.starts_with("##") {
-            branch = raw[2..].trim_start().to_string();
+        if let Some(rest) = raw.strip_prefix("##") {
+            branch = rest.trim_start().to_string();
             continue;
         }
         let b = raw.as_bytes();
@@ -670,7 +680,7 @@ fn build_output(input: &str) -> String {
             continue;
         }
         let low = trimmed.to_ascii_lowercase();
-        let word_ws = |w: &str| low.strip_prefix(w).map_or(false, |r| r.starts_with(char::is_whitespace));
+        let word_ws = |w: &str| low.strip_prefix(w).is_some_and(|r| r.starts_with(char::is_whitespace));
         if low.starts_with("npm err!") || low.starts_with("npm error") || low.starts_with("yarn error") {
             errors.push(line);
         } else if low.starts_with("npm warn deprecated") {
@@ -741,12 +751,12 @@ fn is_summary_line(low: &str) -> bool {
     for verb in ["added", "removed", "changed", "audited", "installed"] {
         if let Some(r) = low.strip_prefix(verb) {
             let r2 = r.trim_start();
-            if r2.len() < r.len() && num_then(r2).map_or(false, |x| x.starts_with("package")) {
+            if r2.len() < r.len() && num_then(r2).is_some_and(|x| x.starts_with("package")) {
                 return true;
             }
         }
     }
-    if low.strip_prefix("finished").map_or(false, |r| r.starts_with(char::is_whitespace)) {
+    if low.strip_prefix("finished").is_some_and(|r| r.starts_with(char::is_whitespace)) {
         return true;
     }
     if low.starts_with("build success")
@@ -760,7 +770,7 @@ fn is_summary_line(low: &str) -> bool {
             return true;
         }
     }
-    if low.strip_prefix("to address ").map_or(false, |r| r.contains(" issues")) {
+    if low.strip_prefix("to address ").is_some_and(|r| r.contains(" issues")) {
         return true;
     }
     low.starts_with("run `npm audit`")
@@ -986,7 +996,7 @@ fn ls(input: &str) -> String {
     }
     out += &format!("\nSummary: {} files, {} dirs", files.len(), dirs.len());
     if !by_ext.is_empty() {
-        by_ext.sort_by(|a, b| b.1.cmp(&a.1)); // stable, like Array.prototype.sort
+        by_ext.sort_by_key(|e| std::cmp::Reverse(e.1)); // stable, like Array.prototype.sort
         let parts: Vec<String> = by_ext.iter().take(LS_EXT_SUMMARY_TOP).map(|(e, c)| format!("{c} {e}")).collect();
         out += &format!(" ({}", parts.join(", "));
         if by_ext.len() > LS_EXT_SUMMARY_TOP {
@@ -1008,7 +1018,7 @@ fn tree(input: &str) -> String {
         }
         kept.push(line);
     }
-    while kept.last().map_or(false, |l| l.trim().is_empty()) {
+    while kept.last().is_some_and(|l| l.trim().is_empty()) {
         kept.pop();
     }
     if kept.len() > TREE_MAX_LINES {
@@ -1144,5 +1154,16 @@ mod tests {
         assert_eq!(stats.hits.len(), 1);
         let out = body["messages"][0]["content"].as_str().unwrap();
         assert!(out.len() < 200);
+    }
+
+    #[test]
+    fn outputs_over_the_cap_are_left_alone() {
+        let big: String = (0..300).map(|_| "same noisy log line\n").collect();
+        let mut body = json!({"messages": [{"role": "tool", "tool_call_id": "1", "content": big.clone()}]});
+        let stats = compress_messages_max(&mut body, big.len() - 1);
+        assert!(stats.hits.is_empty());
+        assert_eq!(stats.outputs, 1);
+        assert_eq!(body["messages"][0]["content"], json!(big));
+        assert_eq!(compress_messages_max(&mut body, big.len()).hits.len(), 1);
     }
 }

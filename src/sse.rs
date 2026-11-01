@@ -51,9 +51,8 @@ impl Parser {
     pub fn push(&mut self, chunk: &[u8]) -> Vec<Event> {
         self.buf.extend_from_slice(chunk);
         let mut out = Vec::new();
-        loop {
-            // Find the end of an event: a blank line (\n\n or \r\n\r\n).
-            let Some((end, skip)) = find_boundary(&self.buf) else { break };
+        // Each event ends with a blank line (\n\n or \r\n\r\n).
+        while let Some((end, skip)) = find_boundary(&self.buf) {
             let raw = self.buf.split_to(end);
             let _ = self.buf.split_to(skip);
             if let Some(ev) = parse_block(std::str::from_utf8(&raw).unwrap_or("")) {

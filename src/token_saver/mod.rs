@@ -11,7 +11,7 @@ pub mod rtk;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use axum::http::HeaderMap;
+use http::HeaderMap;
 use serde_json::{json, Value};
 
 use crate::providers::Format;
@@ -20,9 +20,12 @@ pub const OPT_OUT_HEADER: &str = "x-9router-token-saver";
 const SEP: &str = "\n\n";
 
 /// Settings keys match upstream: `rtkEnabled` (default on), `cavemanEnabled`,
-/// `cavemanLevel` (default full), `ponytailEnabled`, `ponytailLevel` (default full).
+/// `cavemanLevel` (default full), `ponytailEnabled`, `ponytailLevel` (default full);
+/// `rtkMaxBytes` (not upstream) leaves tool outputs over that size uncompressed.
 pub struct Options {
     pub rtk: bool,
+    /// Largest tool output RTK looks at, in bytes.
+    pub rtk_max: usize,
     pub caveman: Option<String>,
     pub ponytail: Option<String>,
 }
@@ -43,6 +46,7 @@ impl Options {
         let level = |k: &str| s.get(k).and_then(Value::as_str).unwrap_or("full");
         Options {
             rtk: flag("rtkEnabled", true),
+            rtk_max: s.get("rtkMaxBytes").and_then(Value::as_u64).map_or(rtk::RAW_CAP, |n| n as usize),
             caveman: flag("cavemanEnabled", false).then(|| prompts::caveman(level("cavemanLevel"))).flatten(),
             ponytail: flag("ponytailEnabled", false).then(|| prompts::ponytail(level("ponytailLevel"))).flatten(),
         }
@@ -83,7 +87,7 @@ pub fn stats() -> Value {
 pub fn apply(body: &mut Value, target: Format, opts: &Options) {
     let mut flags: Vec<String> = Vec::new();
     if opts.rtk {
-        let s = rtk::compress_messages(body);
+        let s = rtk::compress_messages_max(body, opts.rtk_max);
         if s.outputs > 0 {
             TOOL_REQUESTS.fetch_add(1, Ordering::Relaxed);
             TOOL_OUTPUTS.fetch_add(s.outputs as u64, Ordering::Relaxed);
@@ -171,7 +175,7 @@ pub fn inject_system(body: &mut Value, target: Format, prompt: &str) {
         }
         return;
     }
-    let responses = !o.get("messages").map_or(false, Value::is_array);
+    let responses = !o.get("messages").is_some_and(Value::is_array);
     let Some(Value::Array(msgs)) = o.get_mut(if responses { "input" } else { "messages" }) else { return };
     let is_sys = |m: &Value| {
         let role = m.get("role").and_then(Value::as_str);
@@ -181,7 +185,7 @@ pub fn inject_system(body: &mut Value, target: Format, prompt: &str) {
     let present = msgs.iter().filter(|m| is_sys(m)).any(|m| match m.get("content") {
         Some(Value::String(s)) => has_prompt(s, prompt),
         Some(Value::Array(parts)) => {
-            parts.iter().any(|p| p.get("text").and_then(Value::as_str).map_or(false, |t| has_prompt(t, prompt)))
+            parts.iter().any(|p| p.get("text").and_then(Value::as_str).is_some_and(|t| has_prompt(t, prompt)))
         }
         _ => false,
     });

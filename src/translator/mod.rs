@@ -4,6 +4,7 @@
 //! (stop sequences, top_p and `tool_choice: none` are preserved; `is_error` on tool
 //! results survives as a text marker).
 
+pub mod collapse;
 pub mod request;
 pub mod response;
 pub mod responses;

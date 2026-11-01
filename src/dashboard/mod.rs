@@ -298,6 +298,7 @@ async fn mcp_oauth_callback(State(state): State<Arc<AppState>>, Query(q): Query<
         .into_response()
 }
 
+#[allow(clippy::items_after_test_module)]
 #[cfg(test)]
 mod tests {
     use super::*;

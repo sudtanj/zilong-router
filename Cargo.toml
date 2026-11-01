@@ -7,33 +7,69 @@ description = "zilong-router: lightweight single-binary AI API router (OpenAI / 
 license-file = "LICENSE"
 build = "build.rs"
 
+[lib]
+name = "zilong_router"
+path = "src/lib.rs"
+
 [[bin]]
 name = "zilong-router"
 path = "src/main.rs"
+required-features = ["native"]
 
+[features]
+default = ["native"]
+# Everything the binary needs: the HTTP server, dashboard, CLI, SQLite, OAuth sign-in
+# flows, the MCP gateway and the Turso mirror.
+native = [
+    "dep:tokio",
+    "dep:axum",
+    "dep:tower-http",
+    "dep:reqwest",
+    "dep:tokio-stream",
+    "dep:toml",
+    "dep:rusqlite",
+    "dep:tracing-subscriber",
+    "dep:hmac",
+    "dep:clap",
+]
+# The portable core only (provider registry, translation, routing, pricing, usage) for
+# hosts such as Cloudflare Workers (wasm32-unknown-unknown). I/O goes through the
+# `host::Http` and `host::Store` traits. Same code as building without `native`.
+worker = []
 
 [dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal", "fs"] }
-axum = { version = "0.7", features = ["json", "macros"] }
-tower-http = { version = "0.5", features = ["cors"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "gzip", "http2"] }
+# portable core
 futures-util = "0.3"
-tokio-stream = "0.1"
 bytes = "1"
+http = "1"
+async-trait = "0.1"
+web-time = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-toml = "0.8"
-rusqlite = { version = "0.32", features = ["bundled"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 sha2 = "0.10"
-hmac = "0.12"
 rand = "0.8"
 uuid = { version = "1", features = ["v4"] }
 time = { version = "0.3", features = ["formatting", "parsing"] }
 anyhow = "1"
 parking_lot = "0.12"
-clap = { version = "4", features = ["derive", "env"] }
+# native only
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal", "fs"], optional = true }
+axum = { version = "0.7", features = ["json", "macros"], optional = true }
+tower-http = { version = "0.5", features = ["cors"], optional = true }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "gzip", "http2"], optional = true }
+tokio-stream = { version = "0.1", optional = true }
+toml = { version = "0.8", optional = true }
+rusqlite = { version = "0.32", features = ["bundled"], optional = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"], optional = true }
+hmac = { version = "0.12", optional = true }
+clap = { version = "4", features = ["derive", "env"], optional = true }
+
+# Browser-style wasm (Cloudflare Workers): randomness and the clock come from JS.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+time = { version = "0.3", features = ["wasm-bindgen"] }
+uuid = { version = "1", features = ["js"] }
 
 [profile.release]
 opt-level = "s"

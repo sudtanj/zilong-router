@@ -3,13 +3,15 @@
 //! `src/sse/services/auth.js`), with locks stored in the connection's JSON blob
 //! under `modelLock_<model>` / `modelLock___all` so the data stays compatible.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
+use parking_lot::Mutex;
 use serde_json::{json, Value};
 use time::{Duration, OffsetDateTime};
 
 use crate::db::ProviderConnection;
 use crate::model::Resolved;
+#[cfg(feature = "native")]
 use crate::state::AppState;
 
 pub const BACKOFF_BASE_MS: i64 = 2_000;
@@ -58,7 +60,7 @@ pub fn classify(status: u16, body: &str, level: i64) -> Verdict {
         }
     }
     match status {
-        401 | 402 | 403 | 404 => fixed(COOLDOWN_LONG_MS),
+        401..=404 => fixed(COOLDOWN_LONG_MS),
         429 => backoff(),
         400..=499 => Verdict::NoFallback,
         _ => fixed(TRANSIENT_COOLDOWN_MS),
@@ -91,6 +93,7 @@ pub struct RoundRobin {
     pub consecutive: i64,
 }
 
+#[allow(clippy::large_enum_variant)]
 pub enum Pick {
     Connection(ProviderConnection),
     /// Everything is cooling down; retry after this many seconds.
@@ -105,6 +108,7 @@ pub enum Pick {
 /// Strategy comes from `settings.providerStrategies[provider].fallbackStrategy`,
 /// then `settings.fallbackStrategy`, default `fill-first`. Round-robin is sticky for
 /// `stickyRoundRobinLimit` (per provider, then global, default 3) consecutive requests.
+#[cfg(feature = "native")]
 pub fn pick(
     state: &AppState,
     provider: &str,
@@ -112,8 +116,27 @@ pub fn pick(
     exclude: &HashSet<String>,
     pinned: Option<&str>,
 ) -> anyhow::Result<Pick> {
-    let now = OffsetDateTime::now_utc();
     let prov = state.registry.get(provider);
+    let active = || state.db.connections_for(provider, true);
+    choose(prov, provider, active, || state.db.settings(), &state.rr, model, exclude, pinned)
+}
+
+/// [`pick`] without the store: `active` yields the provider's active accounts in
+/// priority order (only called when the provider needs accounts), `settings` the
+/// merged settings (only called when there is more than one candidate), and `rr` holds
+/// the round-robin cursors.
+#[allow(clippy::too_many_arguments)]
+pub fn choose(
+    prov: Option<&crate::providers::Provider>,
+    provider: &str,
+    active: impl FnOnce() -> anyhow::Result<Vec<ProviderConnection>>,
+    settings: impl FnOnce() -> Value,
+    rr: &Mutex<HashMap<String, RoundRobin>>,
+    model: &str,
+    exclude: &HashSet<String>,
+    pinned: Option<&str>,
+) -> anyhow::Result<Pick> {
+    let now = OffsetDateTime::now_utc();
     if prov.map(|p| p.no_auth).unwrap_or(false) {
         // One virtual account: once it failed there is nothing else to try.
         if exclude.contains("noauth") {
@@ -121,7 +144,7 @@ pub fn pick(
         }
         return Ok(Pick::Connection(virtual_connection(provider)));
     }
-    let all = state.db.connections_for(provider, true)?;
+    let all = active()?;
     let mut earliest: Option<OffsetDateTime> = None;
     let candidates: Vec<ProviderConnection> = all
         .into_iter()
@@ -145,7 +168,7 @@ pub fn pick(
         });
     }
 
-    let settings = state.db.settings();
+    let settings = settings();
     let strategy = settings
         .pointer(&format!("/providerStrategies/{provider}/fallbackStrategy"))
         .or_else(|| settings.get("fallbackStrategy"))
@@ -163,7 +186,7 @@ pub fn pick(
         .unwrap_or(3)
         .max(1);
     let ids: Vec<&str> = candidates.iter().map(|c| c.id.as_str()).collect();
-    let idx = advance(state.rr.lock().entry(provider.to_string()).or_default(), &ids, sticky);
+    let idx = advance(rr.lock().entry(provider.to_string()).or_default(), &ids, sticky);
     Ok(Pick::Connection(candidates[idx].clone()))
 }
 
@@ -186,19 +209,24 @@ fn advance(entry: &mut RoundRobin, ids: &[&str], sticky: i64) -> usize {
 /// `auto` follows the global Round Robin setting: each request starts at the next
 /// candidate (sticky for `stickyRoundRobinLimit` requests, like accounts) and the
 /// rest, in order, stay as fallbacks. Fill-first, the default, keeps the order.
+#[cfg(feature = "native")]
 pub fn rotate_auto(state: &AppState, candidates: &mut [Resolved], key: &str) {
-    let settings = state.db.settings();
+    rotate(&state.db.settings(), &state.rr, candidates, key)
+}
+
+/// [`rotate_auto`] with the settings and round-robin cursors passed in.
+pub fn rotate(settings: &Value, rr: &Mutex<HashMap<String, RoundRobin>>, candidates: &mut [Resolved], key: &str) {
     if candidates.len() < 2 || settings.get("fallbackStrategy").and_then(Value::as_str) != Some("round-robin") {
         return;
     }
     let sticky = settings.get("stickyRoundRobinLimit").and_then(Value::as_i64).unwrap_or(3).max(1);
     let labels: Vec<String> = candidates.iter().map(|c| format!("{}/{}", c.provider, c.model)).collect();
     let ids: Vec<&str> = labels.iter().map(String::as_str).collect();
-    let idx = advance(state.rr.lock().entry(key.to_string()).or_default(), &ids, sticky);
+    let idx = advance(rr.lock().entry(key.to_string()).or_default(), &ids, sticky);
     candidates.rotate_left(idx);
 }
 
-fn virtual_connection(provider: &str) -> ProviderConnection {
+pub fn virtual_connection(provider: &str) -> ProviderConnection {
     ProviderConnection {
         id: "noauth".into(),
         provider: provider.into(),
@@ -214,6 +242,7 @@ fn virtual_connection(provider: &str) -> ProviderConnection {
 }
 
 /// Record a failure on the account: lock the model, bump backoff, keep the error.
+#[cfg(feature = "native")]
 pub fn mark_unavailable(
     state: &AppState,
     conn: &ProviderConnection,
@@ -222,22 +251,39 @@ pub fn mark_unavailable(
     error: &str,
     verdict: Verdict,
 ) {
-    if conn.id == "noauth" {
-        return;
+    let Some(patch) = unavailable_patch(conn, model, status, error, verdict) else { return };
+    if let Err(e) = state.db.patch_connection_data(&conn.id, &patch) {
+        tracing::warn!("failed to persist lock for {}: {e}", conn.id);
     }
-    let Verdict::Fallback { cooldown_ms, backoff_level } = verdict else { return };
+    log_locked(conn, model, status, error, verdict);
+}
+
+/// The connection-data patch [`mark_unavailable`] writes; `None` when nothing is stored
+/// (the virtual no-auth account, or a verdict without fallback).
+pub fn unavailable_patch(
+    conn: &ProviderConnection,
+    model: &str,
+    status: u16,
+    error: &str,
+    verdict: Verdict,
+) -> Option<Value> {
+    if conn.id == "noauth" {
+        return None;
+    }
+    let Verdict::Fallback { cooldown_ms, backoff_level } = verdict else { return None };
     let until = OffsetDateTime::now_utc() + Duration::milliseconds(cooldown_ms.min(MAX_RATE_LIMIT_COOLDOWN_MS));
-    let patch = json!({
+    Some(json!({
         lock_key(Some(model)): until.format(&time::format_description::well_known::Rfc3339).unwrap_or_default(),
         "testStatus": "unavailable",
         "lastError": error.chars().take(200).collect::<String>(),
         "errorCode": status,
         "lastErrorAt": crate::db::now_iso(),
         "backoffLevel": backoff_level,
-    });
-    if let Err(e) = state.db.patch_connection_data(&conn.id, &patch) {
-        tracing::warn!("failed to persist lock for {}: {e}", conn.id);
-    }
+    }))
+}
+
+pub fn log_locked(conn: &ProviderConnection, model: &str, status: u16, error: &str, verdict: Verdict) {
+    let Verdict::Fallback { cooldown_ms, .. } = verdict else { return };
     tracing::warn!(
         "{}/{} account {} locked for {}s after {} ({})",
         conn.provider,
@@ -251,11 +297,17 @@ pub fn mark_unavailable(
 
 /// Clear this model's lock, the all-models lock and any expired locks; reset the
 /// error fields when nothing is locked any more.
+#[cfg(feature = "native")]
 pub fn mark_success(state: &AppState, conn: &ProviderConnection, model: &str) {
     if conn.id == "noauth" {
         return;
     }
     let Ok(Some(fresh)) = state.db.get_connection(&conn.id) else { return };
+    let _ = state.db.patch_connection_data(&conn.id, &success_patch(&fresh, model));
+}
+
+/// The patch [`mark_success`] writes, computed from the account's current data.
+pub fn success_patch(fresh: &ProviderConnection, model: &str) -> Value {
     let now = OffsetDateTime::now_utc();
     let mut patch = serde_json::Map::new();
     patch.insert(lock_key(Some(model)), Value::Null);
@@ -279,10 +331,11 @@ pub fn mark_success(state: &AppState, conn: &ProviderConnection, model: &str) {
         }
     }
     patch.insert("lastUsedAt".into(), Value::String(crate::db::now_iso()));
-    let _ = state.db.patch_connection_data(&conn.id, &Value::Object(patch));
+    Value::Object(patch)
 }
 
 /// Housekeeping: drop expired `modelLock_*` keys everywhere.
+#[cfg(feature = "native")]
 pub fn clear_expired_locks(state: &AppState) -> anyhow::Result<()> {
     let now = OffsetDateTime::now_utc();
     for c in state.db.all_connections()? {

@@ -647,7 +647,7 @@ async fn sse_connections_close_when_idle_and_reopen_on_use() {
 }
 
 /// The row of a usage breakdown that `pick` selects.
-fn usage_row<'a>(rows: &'a Value, pick: impl Fn(&Value) -> bool) -> &'a Value {
+fn usage_row(rows: &Value, pick: impl Fn(&Value) -> bool) -> &Value {
     rows.as_array().unwrap().iter().find(|&r| pick(r)).unwrap_or_else(|| panic!("no such row in {rows}"))
 }
 

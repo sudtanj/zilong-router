@@ -209,6 +209,11 @@ async fn text(http: &reqwest::Client, repo: &Repo, path: &str) -> Result<Option<
     Ok(String::from_utf8(bytes.to_vec()).ok().filter(|t| !t.contains('\0')))
 }
 
+/// [`text`] with owned arguments, for a stream of downloads; `rel` is passed through.
+async fn owned_text(http: reqwest::Client, repo: Repo, path: String, rel: String) -> (String, Result<Option<String>>) {
+    (rel, text(&http, &repo, &path).await)
+}
+
 fn binary_name(path: &str) -> bool {
     let ext = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
     BINARY.contains(&ext.as_str())
@@ -239,7 +244,7 @@ async fn download(
         }
     }
     let fetched: Vec<(String, Result<Option<String>>)> = futures_util::stream::iter(
-        wanted.into_iter().map(|(path, rel)| async move { (rel, text(http, repo, &path).await) }),
+        wanted.into_iter().map(|(path, rel)| owned_text(http.clone(), repo.clone(), path, rel)),
     )
     .buffered(PARALLEL)
     .collect()
@@ -256,29 +261,34 @@ async fn download(
     Ok((skill_md, files, skipped))
 }
 
+/// One row of the import checklist (owned arguments, so the futures can run in a stream
+/// inside a `Send` handler).
+async fn preview_item(http: reqwest::Client, repo: Repo, f: Found) -> Value {
+    let main = format!("{}{MAIN_FILE}", prefix(&f.dir));
+    let bytes: usize = f.files.iter().map(|(_, s)| s).sum();
+    let mut item = json!({"dir": f.dir, "files": f.files.len(), "bytes": bytes});
+    match text(&http, &repo, &main).await {
+        Ok(Some(md)) => {
+            let (fields, _) = frontmatter(&md);
+            let folder = f.dir.rsplit('/').next().unwrap_or_default();
+            let name = fields.get("name").cloned().filter(|n| !n.is_empty()).unwrap_or_else(|| folder.to_string());
+            item["name"] = json!(name);
+            item["description"] = json!(fields.get("description").cloned().unwrap_or_default());
+        }
+        Ok(None) => item["error"] = json!("SKILL.md is not a text file"),
+        Err(e) => item["error"] = json!(format!("{e:#}")),
+    }
+    item
+}
+
 /// The skills of `repo` for the import checklist: folder, name, description, file count.
 pub async fn preview(http: &reqwest::Client, repo: &Repo) -> Result<Value> {
     let (found, truncated) = scan(http, repo).await?;
-    let items: Vec<Value> = futures_util::stream::iter(found.iter().map(|f| async move {
-        let main = format!("{}{MAIN_FILE}", prefix(&f.dir));
-        let bytes: usize = f.files.iter().map(|(_, s)| s).sum();
-        let mut item = json!({"dir": f.dir, "files": f.files.len(), "bytes": bytes});
-        match text(http, repo, &main).await {
-            Ok(Some(md)) => {
-                let (fields, _) = frontmatter(&md);
-                let folder = f.dir.rsplit('/').next().unwrap_or_default();
-                let name = fields.get("name").cloned().filter(|n| !n.is_empty()).unwrap_or_else(|| folder.to_string());
-                item["name"] = json!(name);
-                item["description"] = json!(fields.get("description").cloned().unwrap_or_default());
-            }
-            Ok(None) => item["error"] = json!("SKILL.md is not a text file"),
-            Err(e) => item["error"] = json!(format!("{e:#}")),
-        }
-        item
-    }))
-    .buffered(PARALLEL)
-    .collect()
-    .await;
+    let items: Vec<Value> =
+        futures_util::stream::iter(found.into_iter().map(|f| preview_item(http.clone(), repo.clone(), f)))
+            .buffered(PARALLEL)
+            .collect()
+            .await;
     Ok(json!({
         "repo": format!("{}/{}", repo.owner, repo.repo), "ref": repo.git_ref, "path": repo.path,
         "truncated": truncated, "skills": items,

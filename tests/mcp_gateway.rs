@@ -10,7 +10,7 @@ use std::convert::Infallible;
 use std::net::TcpListener as StdListener;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -1074,4 +1074,266 @@ async fn skills_reach_clients_through_the_gateway() {
     assert_eq!(listed["skills"][0]["description"], "Changelogs from git history");
     admin(Method::DELETE, base, "/skills/release-notes", None).await;
     assert_eq!(admin(Method::GET, base, "/skills", None).await["skills"], json!([]));
+}
+
+// ----- nested gateways (Composio) ----------------------------------------------------------
+
+/// A COMPOSIO_SEARCH_TOOLS answer (trimmed from a real one).
+const COMPOSIO_SEARCH: &str = r#"{"successful":true,"data":{"results":[{"index":1,"use_case":"list github issues in a repository","execution_guidance":"Found 4 tools for this query. Look at the schemas to know how to use them.","primary_tool_slugs":["GITHUB_LIST_REPOSITORY_ISSUES"],"related_tool_slugs":["GITHUB_GET_AN_ISSUE","GITHUB_SEARCH_ISSUES","GITHUB_UPDATE_AN_ISSUE"],"toolkits":["github"]}],"toolkit_connection_statuses":[{"toolkit":"github","description":"GitHub is a code hosting platform ...","has_active_connection":true,"accounts":[{"id":"github_belis-neve","status":"ACTIVE","is_default":true}],"status_message":"Connection is active and ready to use"}],"tool_schemas":{"GITHUB_LIST_REPOSITORY_ISSUES":{"toolkit":"GITHUB","tool_slug":"GITHUB_LIST_REPOSITORY_ISSUES","description":"Lists issues (including pull requests) from a GitHub repository. Requires BOTH 'owner' AND 'repo' parameters.","input_schema":{"type":"object","required":["owner","repo"],"properties":{"page":{"type":"integer","default":1},"repo":{"type":"string","description":"REQUIRED. The name of the repository"},"owner":{"type":"string","description":"REQUIRED. The GitHub account owner"},"state":{"enum":["open","closed","all"],"type":"string","default":"open"}}},"hasFullSchema":true},"GITHUB_GET_AN_ISSUE":{"toolkit":"GITHUB","tool_slug":"GITHUB_GET_AN_ISSUE","description":"Retrieves detailed information about a specific issue.","input_schema":{"type":"object","required":["owner","repo","issue_number"],"properties":{"repo":{"type":"string"},"owner":{"type":"string"},"issue_number":{"type":"integer"}}},"hasFullSchema":true},"GITHUB_UPDATE_AN_ISSUE":{"toolkit":"GITHUB","tool_slug":"GITHUB_UPDATE_AN_ISSUE","description":"Updates an existing GitHub issue's title, body, state, milestone, labels, or assignees; `state_reaso...","hasFullSchema":false,"schemaRef":{"tool":"COMPOSIO_GET_TOOL_SCHEMAS","args":{"tool_slugs":["GITHUB_UPDATE_AN_ISSUE"]}}}},"time_info":{"current_time_utc":"2026-11-01T03:06:17.978Z"},"session":{"id":"paid","generate_id":true,"instructions":"REQUIRED: Pass session_id \"paid\" in ALL subsequent meta tool calls for this workflow."},"next_steps_guidance":["Follow these steps carefully to begin the task:","1) Connections active, proceed to next step"],"success":true,"error":null},"error":null,"log_id":"log_x"}"#;
+
+/// A mock Composio tool router (`/mcp`) and a mock GitHub MCP server (`/github`) that can
+/// be made to fail with HTTP 500. Every `tools/call` is logged.
+#[derive(Clone, Default)]
+struct Nest {
+    calls: Arc<Mutex<Vec<(String, Value)>>>,
+    github_down: Arc<AtomicBool>,
+}
+
+impl Nest {
+    /// The arguments of the calls to `tool`, oldest first.
+    fn calls_to(&self, tool: &str) -> Vec<Value> {
+        self.calls.lock().unwrap().iter().filter(|(n, _)| n == tool).map(|(_, a)| a.clone()).collect()
+    }
+}
+
+fn not_found_method(id: &Value) -> Response {
+    Json(response(id, Err(json!({"code": -32601, "message": "method not found"})))).into_response()
+}
+
+fn initialized(name: &str) -> Value {
+    let info = json!({"name": name, "version": "1"});
+    json!({"protocolVersion": "2025-06-18", "capabilities": {"tools": {}}, "serverInfo": info})
+}
+
+async fn composio_mcp(State(n): State<Nest>, Json(msg): Json<Value>) -> Response {
+    let id = msg["id"].clone();
+    if id.is_null() {
+        return StatusCode::ACCEPTED.into_response();
+    }
+    let result = match msg["method"].as_str().unwrap_or_default() {
+        "initialize" => initialized("composio"),
+        "tools/list" => {
+            let any = json!({"type": "object"});
+            json!({"tools": [
+                tool("COMPOSIO_SEARCH_TOOLS", "Search tools for github, gmail and 500 other apps", any.clone()),
+                tool("COMPOSIO_GET_TOOL_SCHEMAS", "Get the schemas of tools", any.clone()),
+                tool("COMPOSIO_MULTI_EXECUTE_TOOL", "Execute github and other app tools", any.clone()),
+                tool("COMPOSIO_MANAGE_CONNECTIONS", "Connect apps", any),
+            ]})
+        }
+        "tools/call" => {
+            let name = msg["params"]["name"].as_str().unwrap_or_default().to_string();
+            let args = msg["params"]["arguments"].clone();
+            n.calls.lock().unwrap().push((name.clone(), args.clone()));
+            match name.as_str() {
+                "COMPOSIO_SEARCH_TOOLS" => text(COMPOSIO_SEARCH),
+                "COMPOSIO_GET_TOOL_SCHEMAS" => {
+                    let schema = json!({"type": "object", "required": ["owner", "repo", "issue_number"],
+                        "properties": {"owner": {"type": "string"}, "repo": {"type": "string"},
+                            "issue_number": {"type": "integer"}, "title": {"type": "string"}}});
+                    let update = json!({"tool_slug": "GITHUB_UPDATE_AN_ISSUE", "description": "Updates an issue",
+                        "input_schema": schema});
+                    text(
+                        json!({"successful": true, "data": {"tool_schemas": {"GITHUB_UPDATE_AN_ISSUE": update}}})
+                            .to_string(),
+                    )
+                }
+                "COMPOSIO_MULTI_EXECUTE_TOOL" => {
+                    let one = &args["tools"][0];
+                    let data = json!({"ran": one["tool_slug"], "args": one["arguments"]});
+                    let outcome = json!({"successful": true, "data": data, "error": null});
+                    let results = json!([{"tool_slug": one["tool_slug"], "index": 0, "response": outcome}]);
+                    text(
+                        json!({"successful": true, "data": {"results": results, "total_count": 1}, "error": null})
+                            .to_string(),
+                    )
+                }
+                other => text(format!("ran {other}")),
+            }
+        }
+        _ => return not_found_method(&id),
+    };
+    Json(response(&id, Ok(result))).into_response()
+}
+
+async fn github_mcp(State(n): State<Nest>, Json(msg): Json<Value>) -> Response {
+    if n.github_down.load(Ordering::SeqCst) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "down").into_response();
+    }
+    let id = msg["id"].clone();
+    if id.is_null() {
+        return StatusCode::ACCEPTED.into_response();
+    }
+    let result = match msg["method"].as_str().unwrap_or_default() {
+        "initialize" => initialized("github"),
+        "tools/list" => {
+            let schema = json!({"type": "object", "required": ["owner", "repo"],
+                "properties": {"owner": {"type": "string"}, "repo": {"type": "string"}}});
+            json!({"tools": [tool("list_issues", "List issues in a GitHub repository", schema)]})
+        }
+        "tools/call" => match msg["params"]["arguments"]["owner"].as_str() {
+            Some(owner) => text(format!("direct issues of {owner}")),
+            None => json!({"content": [{"type": "text", "text": "owner is required"}], "isError": true}),
+        },
+        _ => return not_found_method(&id),
+    };
+    Json(response(&id, Ok(result))).into_response()
+}
+
+async fn start_nest(n: Nest) -> String {
+    let app = Router::new().route("/mcp", post(composio_mcp)).route("/github", post(github_mcp)).with_state(n);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    url
+}
+
+/// The result named `name` of a `search_tools` answer.
+fn result_row(found: &Value, name: &str) -> Value {
+    let rows = found["results"].as_array().unwrap();
+    rows.iter().find(|r| r["tool"] == name).cloned().unwrap_or_else(|| panic!("{name} missing: {found}"))
+}
+
+#[tokio::test]
+async fn nested_gateways_are_flattened() {
+    let nest = Nest::default();
+    let up = start_nest(nest.clone()).await;
+    let router = start_router("nested", 300).await;
+    let base = router.base.as_str();
+    add_server(base, json!({"id": "mock", "url": format!("{up}/mcp"), "description": "Composio"})).await;
+
+    // An empty query lists the server's own tools without its meta tools, and searches nothing upstream.
+    let all = parsed(&call(base, "/mcp", None, "search_tools", json!({"query": ""})).await);
+    assert_eq!(tool_names(&all), ["mock__COMPOSIO_MANAGE_CONNECTIONS"], "{all}");
+    assert!(all["notes"][0].as_str().unwrap().contains("nested Composio gateway"), "{all}");
+    assert!(nest.calls_to("COMPOSIO_SEARCH_TOOLS").is_empty());
+    let init = rpc(base, "/mcp", None, "initialize", json!({})).await;
+    assert!(init["result"]["instructions"].as_str().unwrap().contains("apps behind mock"), "{init}");
+    assert_eq!(server_status(base, "mock").await["nestedGateway"], "Composio");
+
+    // A task: the app tools Composio found, best first, with their parameters.
+    let found = parsed(&call(base, "/mcp", None, "search_tools", json!({"query": "list github issues"})).await);
+    let names = tool_names(&found);
+    assert_eq!(names[0], "mock__GITHUB_LIST_REPOSITORY_ISSUES", "{found}");
+    assert!(
+        names.iter().all(|n| !["SEARCH_TOOLS", "MULTI_EXECUTE", "GET_TOOL_SCHEMAS"].iter().any(|m| n.contains(m))),
+        "meta tools hidden: {found}"
+    );
+    let params = found["results"][0]["parameters"].as_str().unwrap();
+    assert!(params.contains("owner: string") && params.contains("page?: integer"), "{found}");
+    assert!(result_row(&found, "mock__GITHUB_GET_AN_ISSUE")["parameters"].as_str().unwrap().contains("issue_number"));
+    // Only a schemaRef (UPDATE) or nothing (SEARCH): one batched GET_TOOL_SCHEMAS.
+    let update = result_row(&found, "mock__GITHUB_UPDATE_AN_ISSUE");
+    assert!(update["parameters"].as_str().unwrap().contains("issue_number: integer"), "{update}");
+    assert!(result_row(&found, "mock__GITHUB_SEARCH_ISSUES")["hint"].is_string(), "{found}");
+    let search = nest.calls_to("COMPOSIO_SEARCH_TOOLS");
+    assert_eq!(search[0]["queries"][0]["use_case"], "list github issues");
+    assert_eq!(search[0]["session"], json!({"generate_id": true}));
+    let batch = nest.calls_to("COMPOSIO_GET_TOOL_SCHEMAS");
+    assert_eq!(batch.len(), 1, "{batch:?}");
+    assert_eq!(batch[0]["tool_slugs"], json!(["GITHUB_SEARCH_ISSUES", "GITHUB_UPDATE_AN_ISSUE"]));
+    assert_eq!(batch[0]["session_id"], "paid");
+
+    // A call goes straight to MULTI_EXECUTE with the session, and comes back unwrapped.
+    let r = run(base, None, "mock__GITHUB_LIST_REPOSITORY_ISSUES", json!({"owner": "o", "repo": "r"})).await;
+    assert_eq!(parsed(&r), json!({"ran": "GITHUB_LIST_REPOSITORY_ISSUES", "args": {"owner": "o", "repo": "r"}}));
+    let exec = nest.calls_to("COMPOSIO_MULTI_EXECUTE_TOOL");
+    let one = json!({"tool_slug": "GITHUB_LIST_REPOSITORY_ISSUES", "arguments": {"owner": "o", "repo": "r"}});
+    let expected = json!({"tools": [one], "sync_response_to_workbench": false, "session_id": "paid"});
+    assert_eq!(exec[0], expected);
+
+    // The next search reuses the session, and the schemas already fetched.
+    call(base, "/mcp", None, "search_tools", json!({"query": "update an issue"})).await;
+    assert_eq!(nest.calls_to("COMPOSIO_SEARCH_TOOLS")[1]["session"], json!({"id": "paid"}));
+    assert_eq!(nest.calls_to("COMPOSIO_GET_TOOL_SCHEMAS").len(), 2, "only SEARCH_ISSUES again");
+
+    // Schemas from the search, or asked upstream.
+    let names = json!({"tools": ["mock__GITHUB_GET_AN_ISSUE", "mock__GITHUB_STAR_REPO"]});
+    let schemas = parsed(&call(base, "/mcp", None, "get_tool_schemas", names).await);
+    assert_eq!(schemas["tools"][0]["inputSchema"]["required"], json!(["owner", "repo", "issue_number"]));
+    assert!(schemas["tools"][1]["error"].is_string(), "{schemas}");
+    assert_eq!(nest.calls_to("COMPOSIO_GET_TOOL_SCHEMAS").last().unwrap()["tool_slugs"], json!(["GITHUB_STAR_REPO"]));
+
+    // A tool no search found (say after a restart) is passed through; native tools still work.
+    let r = run(base, None, "mock__GITHUB_STAR_REPO", json!({"repo": "x"})).await;
+    assert_eq!(parsed(&r)["ran"], "GITHUB_STAR_REPO");
+    let r = run(base, None, "mock__COMPOSIO_MANAGE_CONNECTIONS", json!({"toolkits": ["github"]})).await;
+    assert_eq!(first_text(&r), "ran COMPOSIO_MANAGE_CONNECTIONS");
+
+    // Usage shows the app tool, not MULTI_EXECUTE.
+    let u = admin(reqwest::Method::GET, base, "/mcp/usage?range=24h", None).await;
+    let list = usage_row(&u["byTool"], |r| r["tool"] == "GITHUB_LIST_REPOSITORY_ISSUES");
+    assert_eq!((&list["server"], list["calls"].as_i64()), (&json!("mock"), Some(1)), "{u}");
+    assert!(u["byTool"].as_array().unwrap().iter().all(|r| r["tool"] != "COMPOSIO_MULTI_EXECUTE_TOOL"), "{u}");
+
+    // Off: the old behaviour.
+    admin(reqwest::Method::PATCH, base, "/mcp/servers/mock", Some(json!({"nested": "off"}))).await;
+    assert!(server_status(base, "mock").await["nestedGateway"].is_null());
+    let searches = nest.calls_to("COMPOSIO_SEARCH_TOOLS").len();
+    let off = parsed(&call(base, "/mcp", None, "search_tools", json!({"query": "list github issues"})).await);
+    assert_eq!(tool_names(&off), ["mock__COMPOSIO_MULTI_EXECUTE_TOOL", "mock__COMPOSIO_SEARCH_TOOLS"], "{off}");
+    assert!(off.get("notes").is_none(), "{off}");
+    assert_eq!(nest.calls_to("COMPOSIO_SEARCH_TOOLS").len(), searches);
+    let r = run(base, None, "mock__GITHUB_LIST_REPOSITORY_ISSUES", json!({})).await;
+    assert_eq!(first_text(&r), "ran GITHUB_LIST_REPOSITORY_ISSUES");
+}
+
+#[tokio::test]
+async fn direct_servers_come_first_and_fall_back_to_nested_gateways() {
+    let nest = Nest::default();
+    let up = start_nest(nest.clone()).await;
+    let router = start_router("fallback", 300).await;
+    let base = router.base.as_str();
+    add_server(base, json!({"id": "mock", "url": format!("{up}/mcp")})).await;
+    add_server(base, json!({"id": "github", "url": format!("{up}/github")})).await;
+
+    // The direct server first; Composio's github tools marked as its fallback.
+    let found = parsed(&call(base, "/mcp", None, "search_tools", json!({"query": "list github issues"})).await);
+    assert_eq!(tool_names(&found)[0], "github__list_issues", "{found}");
+    assert_eq!(result_row(&found, "mock__GITHUB_LIST_REPOSITORY_ISSUES")["fallback"], true, "{found}");
+
+    // Working, or failing as a tool: no fallback.
+    let r = run(base, None, "github__list_issues", json!({"owner": "o", "repo": "r"})).await;
+    assert_eq!(first_text(&r), "direct issues of o");
+    let r = run(base, None, "github__list_issues", json!({})).await;
+    assert_eq!((r["isError"].as_bool(), first_text(&r)), (Some(true), "owner is required"));
+    assert!(nest.calls_to("COMPOSIO_MULTI_EXECUTE_TOOL").is_empty());
+
+    // Down (HTTP 500): the same tool through Composio, when the arguments fit its schema.
+    nest.github_down.store(true, Ordering::SeqCst);
+    let r = run(base, None, "github__list_issues", json!({"owner": "o", "repo": "r"})).await;
+    let note = first_text(&r);
+    assert!(note.contains("HTTP 500") && note.contains("through the nested gateway mock"), "{r}");
+    let data: Value = serde_json::from_str(r["content"][1]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(data, json!({"ran": "GITHUB_LIST_REPOSITORY_ISSUES", "args": {"owner": "o", "repo": "r"}}));
+    let use_case = nest.calls_to("COMPOSIO_SEARCH_TOOLS").last().unwrap()["queries"][0]["use_case"].clone();
+    assert_eq!(use_case, "github: List issues in a GitHub repository");
+    // Arguments the found tool does not know: no guess, but its name and parameters.
+    let r = run(base, None, "github__list_issues", json!({"owner": "o", "repo": "r", "labels": "bug"})).await;
+    let t = first_text(&r);
+    assert!(r["isError"] == true && t.contains("mock__GITHUB_LIST_REPOSITORY_ISSUES (") && t.contains("owner: string"));
+    assert_eq!(nest.calls_to("COMPOSIO_MULTI_EXECUTE_TOOL").len(), 1);
+
+    // Both attempts are counted.
+    let u = admin(reqwest::Method::GET, base, "/mcp/usage?range=24h", None).await;
+    let direct = usage_row(&u["byTool"], |r| r["server"] == "github" && r["tool"] == "list_issues");
+    assert_eq!((direct["calls"].as_i64(), direct["errors"].as_i64()), (Some(4), Some(3)), "{u}");
+    let via = usage_row(&u["byTool"], |r| r["server"] == "mock" && r["tool"] == "GITHUB_LIST_REPOSITORY_ISSUES");
+    assert_eq!(via["calls"].as_i64(), Some(1), "{u}");
+
+    // Disabled: its calls go through Composio too.
+    admin(reqwest::Method::PATCH, base, "/mcp/servers/github", Some(json!({"enabled": false}))).await;
+    let r = run(base, None, "github__list_issues", json!({"owner": "o", "repo": "r"})).await;
+    assert!(first_text(&r).contains("the server is disabled"), "{r}");
+
+    // A server for github (by its service setting) that cannot connect: Composio's tools first.
+    add_server(base, json!({"id": "gh-down", "url": "http://127.0.0.1:9/mcp", "service": "github"})).await;
+    let found = parsed(&call(base, "/mcp", None, "search_tools", json!({"query": "list github issues"})).await);
+    assert_eq!(tool_names(&found)[0], "mock__GITHUB_LIST_REPOSITORY_ISSUES", "{found}");
+    assert!(found["results"][0].get("fallback").is_none(), "{found}");
+    assert!(found["notes"].to_string().contains("gh-down cannot be used now (cannot connect)"), "{found}");
+    let r = run(base, None, "gh-down__list_issues", json!({"owner": "o", "repo": "r"})).await;
+    assert!(first_text(&r).contains("through the nested gateway mock"), "{r}");
+    let use_case = nest.calls_to("COMPOSIO_SEARCH_TOOLS").last().unwrap()["queries"][0]["use_case"].clone();
+    assert_eq!(use_case, "github: list issues");
 }

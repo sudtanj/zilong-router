@@ -241,6 +241,28 @@ claude mcp add --transport http zilong-router http://<router>:20128/mcp \
   `MCP_IDLE_SECS` (default 300; 0 keeps it open) without calls. Each server's tool list is
   cached in the database, so `search_tools` does not connect; the refresh button (or a
   `tools/list_changed` notification) reloads it.
+- **Nested gateways (Composio)**: a server that is itself a meta-tool gateway is
+  flattened on `/mcp`, so small models don't go through two layers of meta tools.
+  Detected from its tools: Composio (`COMPOSIO_SEARCH_TOOLS` + `COMPOSIO_MULTI_EXECUTE_TOOL`)
+  or a gateway like this one (`search_tools` + `call_tool`). `search_tools` with a query
+  also runs the server's own search (10 s budget; Composio's session id is reused for
+  30 min per API key) and returns its apps' tools as `<server>__<SLUG>` with their
+  parameters, plus short `notes` (toolkits to connect with
+  `<server>__COMPOSIO_MANAGE_CONNECTIONS`). `get_tool_schemas` and `call_tool` work on
+  those names directly; a call runs `COMPOSIO_MULTI_EXECUTE_TOOL` for that one tool, the
+  per-tool wrapper is removed from the answer, and usage is counted under the app tool's
+  name. The upstream's search, schema and execute tools are hidden from search results.
+  `/mcp/all` is unchanged. Turn it off per server with **Nested gateway: Off**.
+- **Direct servers first, nested gateway as fallback**: when you also have a server of
+  its own for a service (a `github` server next to Composio's `github` toolkit; matched
+  by id or name, or by the server's **Service** setting), its tools rank above the nested
+  gateway's, which come back marked `fallback`. If that server cannot be used (sign-in
+  needed, cannot connect, disabled), the nested tools rank first instead. When a call to
+  it fails for infrastructure reasons (unreachable, HTTP 5xx, timeout, 401/403, sign-in,
+  disabled; not tool errors), the gateway searches the nested gateway for the same tool:
+  if the arguments fit the found tool's schema it runs it and says so in a first text
+  block, otherwise it answers with the nested tool's name and parameters. Both attempts
+  are counted in the usage.
 - **Access**: the API keys of `/v1`, with the same rules (loopback clients need no key
   unless `requireApiKey` is set). A restricted key reaches only the servers on its allow
   list as `mcp/<server id>`, or all of them with `mcp/*`. Clients can also sign in with

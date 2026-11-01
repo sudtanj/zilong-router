@@ -19,16 +19,52 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - name: Format
+        id: fmt
+        continue-on-error: true
         run: cargo fmt --all --check || { cargo fmt --all && git diff > fmt.patch; exit 1; }
-      - name: Upload rustfmt patch
-        if: failure()
+      - name: Lockfile
+        id: lock
+        continue-on-error: true
+        run: |
+          cargo metadata --format-version 1 > /dev/null
+          git diff --exit-code Cargo.lock > /dev/null || { git diff Cargo.lock > lock.patch; exit 1; }
+      - name: Upload rustfmt / lockfile patches
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: fmt.patch
-          path: fmt.patch
+          name: patches
+          path: |
+            fmt.patch
+            lock.patch
           if-no-files-found: ignore
       - run: cargo clippy --all-targets
       - run: cargo test --locked
+      - name: Fail on format or lockfile drift
+        if: steps.fmt.outcome == 'failure' || steps.lock.outcome == 'failure'
+        run: exit 1
+
+  # The portable core as kongming-cloud (Cloudflare Workers, workers-rs) builds it.
+  wasm-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm32
+      - name: Check (wasm32, no native)
+        run: cargo check --lib --no-default-features --features worker --target wasm32-unknown-unknown
+      - name: Clippy (wasm32, no native)
+        run: cargo clippy --lib --no-default-features --features worker --target wasm32-unknown-unknown -- -D warnings
+      - name: No server, TLS or SQLite crates in the wasm build
+        run: |
+          cargo tree --no-default-features --features worker --target wasm32-unknown-unknown -e normal --prefix none \
+            | awk '{print $1}' | sort -u > deps.txt
+          cat deps.txt
+          if grep -xE 'tokio|reqwest|rusqlite|libsqlite3-sys|axum|hyper|clap|ring|rustls|mio' deps.txt; then exit 1; fi
 
   build:
     needs: test

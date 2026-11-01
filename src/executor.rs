@@ -2,14 +2,18 @@
 //! (`open-sse/executors/base.js` + `default.js`, generic part only).
 
 use std::collections::HashMap;
+#[cfg(feature = "native")]
 use std::time::Duration;
 
-use axum::http::HeaderMap;
+use http::HeaderMap;
+#[cfg(feature = "native")]
 use reqwest::header::{HeaderName, HeaderValue};
 use serde_json::Value;
 
 use crate::db::ProviderConnection;
+use crate::host::{Http, HttpRequest, HttpResponse};
 use crate::providers::{AuthSpec, Format, Provider, Transport};
+#[cfg(feature = "native")]
 use crate::state::AppState;
 
 /// Default retry table: (status, attempts, delay ms). 429 is never retried on the
@@ -124,7 +128,7 @@ fn apply_auth(
 /// `settings.providerOverrides[provider].headers`, and `Accept` for streams.
 #[allow(clippy::too_many_arguments)]
 pub fn build_headers(
-    state: &AppState,
+    settings: &Value,
     provider: &Provider,
     transport: &Transport,
     conn: &ProviderConnection,
@@ -162,9 +166,7 @@ pub fn build_headers(
         }
     }
     crate::oauth::hooks::headers(provider, conn, client, model, body, &mut h);
-    if let Some(Value::Object(over)) =
-        state.db.settings().pointer(&format!("/providerOverrides/{}/headers", provider.id))
-    {
+    if let Some(Value::Object(over)) = settings.pointer(&format!("/providerOverrides/{}/headers", provider.id)) {
         for (k, v) in over {
             if let Some(s) = v.as_str() {
                 h.insert(k.clone(), s.to_string());
@@ -193,6 +195,7 @@ fn retry_policy(transport: &Transport, status: u16) -> (u32, u64) {
 
 /// POST `body` upstream. Returns the response once headers arrive with a 2xx status.
 #[allow(clippy::too_many_arguments)]
+#[cfg(feature = "native")]
 pub async fn send(
     state: &AppState,
     provider: &Provider,
@@ -204,7 +207,7 @@ pub async fn send(
     stream: bool,
 ) -> Result<reqwest::Response, ExecError> {
     let url = build_url(provider, transport, conn, model, stream);
-    let headers = build_headers(state, provider, transport, conn, client_headers, model, body, stream);
+    let headers = build_headers(&state.db.settings(), provider, transport, conn, client_headers, model, body, stream);
     let mut hm = reqwest::header::HeaderMap::new();
     for (k, v) in &headers {
         if let (Ok(n), Ok(val)) = (HeaderName::from_bytes(k.as_bytes()), HeaderValue::from_str(v)) {
@@ -266,6 +269,74 @@ pub async fn send(
     }
 }
 
+
+/// [`send`] through a host's [`Http`] client. `budget` counts the calls the host still
+/// allows (a Worker's subrequest limit); every attempt, retries included, uses one.
+/// The response comes back once its headers arrive with a 2xx status.
+#[allow(clippy::too_many_arguments)]
+pub async fn send_via<H: Http + ?Sized>(
+    http: &H,
+    settings: &Value,
+    provider: &Provider,
+    transport: &Transport,
+    conn: &ProviderConnection,
+    model: &str,
+    body: &Value,
+    client_headers: &HeaderMap,
+    stream: bool,
+    timeout_ms: u64,
+    budget: &mut usize,
+) -> Result<HttpResponse, ExecError> {
+    let url = build_url(provider, transport, conn, model, stream);
+    let headers: Vec<(String, String)> =
+        build_headers(settings, provider, transport, conn, client_headers, model, body, stream).into_iter().collect();
+    let payload = serde_json::to_vec(body).map_err(|e| ExecError::Network(e.to_string()))?;
+    let timeout = transport.timeout_ms.unwrap_or(timeout_ms);
+    let mut attempt: u32 = 0;
+    loop {
+        if *budget == 0 {
+            return Err(ExecError::Network("request error: upstream call budget used up".into()));
+        }
+        *budget -= 1;
+        let req = HttpRequest {
+            method: "POST".into(),
+            url: url.clone(),
+            headers: headers.clone(),
+            body: payload.clone(),
+            timeout_ms: Some(timeout),
+        };
+        let (status, retry_delay, body_text) = match http.send(req).await {
+            Ok(resp) if (200..300).contains(&resp.status) => return Ok(resp),
+            Ok(resp) => {
+                let retry_after =
+                    resp.header("retry-after").and_then(|s| s.trim().parse::<u64>().ok()).map(|s| s * 1000);
+                (resp.status, retry_after, resp.text().await.unwrap_or_default())
+            }
+            // Hosts report transport failures as text; keep the binary's prefixes so
+            // they are classified as network errors below.
+            Err(e) if e.starts_with("timeout error") || e.starts_with("connect error") => (502, None, e),
+            Err(e) => (502, None, format!("request error: {e}")),
+        };
+        let (max_attempts, delay_ms) = retry_policy(transport, status);
+        if attempt < max_attempts && *budget > 0 {
+            attempt += 1;
+            let wait = retry_delay.unwrap_or(delay_ms).min(30_000);
+            tracing::info!("{} {} -> {}, retry {}/{} in {}ms", provider.id, model, status, attempt, max_attempts, wait);
+            http.sleep(wait).await;
+            continue;
+        }
+        return Err(
+            if body_text.starts_with("timeout error")
+                || body_text.starts_with("connect error")
+                || body_text.starts_with("request error")
+            {
+                ExecError::Network(body_text)
+            } else {
+                ExecError::Status { status, body: body_text }
+            },
+        );
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

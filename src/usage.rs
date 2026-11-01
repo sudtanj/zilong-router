@@ -4,6 +4,7 @@
 use serde_json::{json, Value};
 
 use crate::db::UsageRow;
+#[cfg(feature = "native")]
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -111,14 +112,14 @@ pub struct Record<'a> {
     pub ttft_ms: Option<u128>,
 }
 
-/// Persist a request. Skips rows with no tokens at all, like upstream.
-pub fn record(state: &AppState, r: Record<'_>) {
+/// The `usageHistory` row for a request, costed with `pricing` and the user's
+/// `settings.pricing` overrides. `None` for rows with no tokens at all (upstream skips them).
+pub fn row(pricing: &crate::pricing::Table, settings: &Value, r: Record<'_>) -> Option<UsageRow> {
     if r.tokens.is_empty() {
-        return;
+        return None;
     }
-    let settings = state.db.settings();
-    let price = state.pricing.lookup(r.provider, r.model, settings.get("pricing"));
-    let row = UsageRow {
+    let price = pricing.lookup(r.provider, r.model, settings.get("pricing"));
+    Some(UsageRow {
         timestamp: crate::db::now_iso(),
         provider: r.provider.to_string(),
         model: r.model.to_string(),
@@ -131,7 +132,16 @@ pub fn record(state: &AppState, r: Record<'_>) {
         status: r.status.to_string(),
         tokens: r.tokens.to_json(),
         meta: json!({"latencyMs": r.latency_ms as u64, "ttftMs": r.ttft_ms.map(|v| v as u64)}),
-    };
+    })
+}
+
+/// Persist a request. Skips rows with no tokens at all, like upstream.
+#[cfg(feature = "native")]
+pub fn record(state: &AppState, r: Record<'_>) {
+    if r.tokens.is_empty() {
+        return;
+    }
+    let Some(row) = row(&state.pricing, &state.db.settings(), r) else { return };
     if let Err(e) = state.db.insert_usage(&row) {
         tracing::warn!("usage insert failed: {e}");
     }

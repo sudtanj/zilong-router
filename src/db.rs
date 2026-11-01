@@ -5,14 +5,21 @@
 //! A single connection behind a mutex is enough here: every query is sub-millisecond
 //! and the box serves one developer, not a fleet.
 
+#[cfg(feature = "native")]
 use anyhow::{Context, Result};
+#[cfg(feature = "native")]
 use parking_lot::Mutex;
+#[cfg(feature = "native")]
 use rusqlite::types::Value as SqlValue;
+#[cfg(feature = "native")]
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+#[cfg(feature = "native")]
 use std::path::Path;
 
+/// The SQLite store of the binary (`native`). Other hosts implement `host::Store`.
+#[cfg(feature = "native")]
 pub struct Db {
     conn: Mutex<Connection>,
 }
@@ -88,6 +95,32 @@ pub fn now_iso() -> String {
     time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap_or_default()
 }
 
+/// Settings every install starts from; stored keys override them one by one.
+pub fn default_settings() -> Value {
+    json!({
+        "requireLogin": false,
+        "requireApiKey": false,
+        "fallbackStrategy": "fill-first",
+        "stickyRoundRobinLimit": 3,
+        "providerStrategies": {},
+        "providerOverrides": {},
+        "pricing": {},
+        "rtkEnabled": false,
+    })
+}
+
+/// `default_settings()` with the stored JSON object's keys laid over it (what
+/// `Db::settings` returns).
+pub fn merge_settings(stored: Option<Value>) -> Value {
+    let mut base = default_settings();
+    if let Some(Value::Object(m)) = stored {
+        for (k, v) in m {
+            base[k] = v;
+        }
+    }
+    base
+}
+
 pub const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK (id = 1), data TEXT NOT NULL);
@@ -115,6 +148,7 @@ CREATE TABLE IF NOT EXISTS usageDaily (dateKey TEXT PRIMARY KEY, data TEXT);
 CREATE TABLE IF NOT EXISTS requestDetails (id TEXT PRIMARY KEY, timestamp TEXT, provider TEXT, model TEXT, connectionId TEXT, status TEXT, data TEXT);
 "#;
 
+#[cfg(feature = "native")]
 impl Db {
     pub fn open(path: &Path) -> Result<Db> {
         let conn = Connection::open(path).with_context(|| format!("opening {}", path.display()))?;
@@ -204,16 +238,7 @@ impl Db {
     // ----- settings ------------------------------------------------------------
 
     pub fn default_settings() -> Value {
-        json!({
-            "requireLogin": false,
-            "requireApiKey": false,
-            "fallbackStrategy": "fill-first",
-            "stickyRoundRobinLimit": 3,
-            "providerStrategies": {},
-            "providerOverrides": {},
-            "pricing": {},
-            "rtkEnabled": false,
-        })
+        default_settings()
     }
 
     pub fn settings(&self) -> Value {

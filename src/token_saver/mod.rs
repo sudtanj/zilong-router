@@ -11,7 +11,7 @@ pub mod rtk;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use axum::http::HeaderMap;
+use http::HeaderMap;
 use serde_json::{json, Value};
 
 use crate::providers::Format;

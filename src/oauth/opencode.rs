@@ -9,12 +9,14 @@
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use axum::http::HeaderMap;
+use http::HeaderMap;
 use parking_lot::Mutex;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+// `std::time` on native, the JS clock on wasm (where `std::time::Instant::now` panics).
+use web_time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::providers::{Format, Provider, Transport};
 
@@ -251,7 +253,7 @@ fn descending_hex(time: u64, counter: u64) -> String {
 static COUNTER: LazyLock<Mutex<(u64, u64)>> = LazyLock::new(|| Mutex::new((0, 0)));
 
 fn new_session_id() -> String {
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
     let counter = {
         let mut c = COUNTER.lock();
         if c.0 != now {

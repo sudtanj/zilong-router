@@ -7,8 +7,10 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
+#[cfg(feature = "native")]
 use anyhow::{bail, Result};
-use axum::http::HeaderMap;
+use http::HeaderMap;
+#[cfg(feature = "native")]
 use parking_lot::Mutex;
 use serde_json::{json, Value};
 
@@ -16,6 +18,7 @@ use super::{opencode, util};
 use crate::db::ProviderConnection;
 use crate::providers::{Format, Provider, Transport};
 use crate::sse::Event;
+#[cfg(feature = "native")]
 use crate::state::AppState;
 
 const GITHUB_MESSAGES: &str = "https://api.githubcopilot.com/v1/messages";
@@ -464,6 +467,7 @@ fn github_body(model: &str, body: &mut Value) {
 
 // ----- MiMo free tier ----------------------------------------------------------------
 
+#[cfg(feature = "native")]
 const MIMO_BOOTSTRAP: &str = "https://api.xiaomimimo.com/api/free-ai/bootstrap";
 const MIMO_SYSTEM_MARKER: &str =
     "You are MiMoCode, an interactive CLI tool that helps users with software engineering tasks.";
@@ -479,6 +483,7 @@ static MIMO_SESSION: LazyLock<String> = LazyLock::new(|| {
     format!("ses_{tail}")
 });
 /// (jwt, expires at unix seconds)
+#[cfg(feature = "native")]
 static MIMO_JWT: LazyLock<Mutex<Option<(String, i64)>>> = LazyLock::new(|| Mutex::new(None));
 
 fn mimo_marker(body: &mut Value) {
@@ -494,6 +499,7 @@ fn mimo_marker(body: &mut Value) {
 
 /// The free tier hands out a JWT per machine fingerprint; cached until 5 min before
 /// it expires, or dropped with `reset` after a 401/403.
+#[cfg(feature = "native")]
 pub async fn mimo_jwt(state: &AppState, reset: bool) -> Result<String> {
     if reset {
         *MIMO_JWT.lock() = None;

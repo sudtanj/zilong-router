@@ -614,7 +614,7 @@ function mcpRow(s) {
   const tools = s.toolCount != null ? `<a href="#" data-act="mcpTools" data-id="${esc(s.id)}" style="color:var(--primary)">${s.toolCount} tools</a> · listed ${relTime(s.toolsFetchedAt).toLowerCase()}` : 'Tools not listed yet';
   return `<div class="keyrow ${s.enabled ? '' : 'off'}">
     <div class="grow" style="min-width:0">
-      <div class="row wrap" style="gap:8px"><p class="sm medium">${esc(s.name)}</p><code>${esc(s.id)}</code>${badge(s.transport === 'sse' ? 'SSE' : 'HTTP', 'primary')}${mcpStatus(s)}</div>
+      <div class="row wrap" style="gap:8px"><p class="sm medium">${esc(s.name)}</p><code>${esc(s.id)}</code>${badge(s.transport === 'sse' ? 'SSE' : 'HTTP', 'primary')}${mcpStatus(s)}${s.nestedGateway ? `<span title="Its apps' tools are found by search_tools and called directly">${badge('Nested gateway: ' + esc(s.nestedGateway), 'success')}</span>` : ''}${s.service ? badge('Service: ' + esc(s.service)) : ''}</div>
       <p class="xs muted mono mt1 truncate" title="${esc(target)}">${esc(target)}</p>
       ${s.description ? `<p class="xs muted mt1">${esc(s.description)}</p>` : ''}
       <p class="xs muted mt1">${tools}${calls}</p>
@@ -689,6 +689,10 @@ function mcpForm(s) {
       ${field('url', 'URL', {value: s.url, placeholder: 'https://example.com/mcp', mono: true, required: true})}
       ${field('headers', 'Headers (Name: value, one per line)', {type: 'textarea', rows: 3, value: mapToLines(s.headers, ': '), placeholder: 'Authorization: Bearer …'})}
       ${field('timeoutSecs', 'Call timeout in seconds', {type: 'number', min: 0, value: s.timeoutSecs || '', placeholder: '120'})}
+      <div class="row gap2" style="align-items:flex-start"><div class="grow">${field('nested', 'Nested gateway', {type: 'select', value: s.nested || 'auto', options: [{value: 'auto', label: 'Flatten when detected'}, {value: 'off', label: 'Off (show its meta tools as they are)'}],
+          hint: 'For servers that are themselves tool gateways (Composio, another zilong-router): <code>search_tools</code> also searches their apps and <code>call_tool</code> runs those tools directly.'})}</div>
+        <div class="grow">${field('service', 'Service (for nested-gateway fallback)', {value: s.service, placeholder: 'from the id and name', mono: true,
+          hint: 'The app this server is for, such as <code>github</code>. A nested gateway\'s tools for it rank below this server\'s and stand in when this server fails.'})}</div></div>
       <details class="mb4" ${s.oauthClientId || s.oauthScope ? 'open' : ''}><summary class="sm medium" style="cursor:pointer">OAuth (optional)</summary>
         <p class="hint mt1 mb2">Servers that need OAuth get a Sign in button after a failed call; the router registers itself with their authorization server. Only fill these in if that server does not allow registration.</p>
         <div class="row gap2" style="align-items:flex-start"><div class="grow">${field('oauthClientId', 'Client id', {value: s.oauthClientId, mono: true})}</div>
@@ -701,6 +705,7 @@ function mcpForm(s) {
       const body = {
         name: f.name.value.trim(), description: f.description.value.trim(), transport: f.transport.value,
         url: f.url.value.trim(), headers: linesToMap(f.headers.value, ':'), timeoutSecs: Number(f.timeoutSecs.value) || 0,
+        nested: f.nested.value, service: f.service.value.trim(),
         oauthClientId: f.oauthClientId.value.trim(), oauthClientSecret: f.oauthClientSecret.value, oauthScope: f.oauthScope.value.trim(),
       };
       if (edit) await patch(mcpPath(s.id), body);

@@ -963,6 +963,8 @@ fn mcp_server_json(state: &AppState, s: &ServerConfig) -> Value {
     let cached = mcp::cached_tools(&state.db, &s.id);
     v["status"] = json!(state.mcp.status(&s.id));
     v["toolCount"] = json!(cached.as_ref().map(|c| c.tools.len()));
+    let adapter = cached.as_ref().and_then(|c| mcp::nested::detect(s, &c.tools));
+    v["nestedGateway"] = json!(adapter.map(mcp::nested::Adapter::label));
     v["toolsFetchedAt"] = json!(cached.map(|c| c.fetched_at));
     v["stats"] = json!(state.mcp.stats(&s.id));
     v["auth"] = mcp::auth::summary(&state.db, &s.id);

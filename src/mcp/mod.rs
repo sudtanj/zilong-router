@@ -13,6 +13,7 @@
 
 pub mod auth;
 pub mod client;
+pub mod nested;
 pub mod oauth_server;
 pub mod server;
 pub mod usage;
@@ -50,6 +51,17 @@ pub enum Transport {
     Sse,
 }
 
+/// Whether a server that is itself a meta-tool gateway (Composio, another zilong-router)
+/// is flattened: the tools of its apps are found by `search_tools` and called directly
+/// (see [`nested`]).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Nested {
+    #[default]
+    Auto,
+    Off,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ServerConfig {
@@ -68,6 +80,12 @@ pub struct ServerConfig {
     pub oauth_client_secret: String,
     /// Scopes to ask for instead of the ones the server advertises.
     pub oauth_scope: String,
+    /// Flatten this server when it is a nested gateway (default `auto`).
+    pub nested: Nested,
+    /// The service this server is for (`github`), matched against the toolkits of nested
+    /// gateways; empty means its id and name. A nested gateway's tools for the same
+    /// service rank below this server's and stand in when it fails.
+    pub service: String,
 }
 
 impl Default for ServerConfig {
@@ -84,6 +102,8 @@ impl Default for ServerConfig {
             oauth_client_id: String::new(),
             oauth_client_secret: String::new(),
             oauth_scope: String::new(),
+            nested: Nested::Auto,
+            service: String::new(),
         }
     }
 }
@@ -131,6 +151,7 @@ impl ServerConfig {
             self.name = self.id.clone();
         }
         self.url = self.url.trim().to_string();
+        self.service = self.service.trim().to_string();
         self.headers.retain(|k, _| !k.trim().is_empty());
         if !(self.url.starts_with("http://") || self.url.starts_with("https://")) {
             return Err("the URL must start with http:// or https://".into());
@@ -442,12 +463,16 @@ pub struct Stats {
     pub reconnects: u64,
     /// When the latest connection was opened.
     pub opened_at: Option<String>,
+    /// The latest attempt to connect failed.
+    pub connect_failed: bool,
 }
 
 #[derive(Default)]
 pub struct Gateway {
     slots: Mutex<HashMap<String, Slot>>,
     stats: Mutex<HashMap<String, Stats>>,
+    /// Tools and sessions of nested gateways, learnt from their searches.
+    pub nested: nested::Cache,
 }
 
 impl Gateway {
@@ -497,6 +522,7 @@ impl Gateway {
             Err(e) => {
                 let text = format!("{e:#}");
                 tracing::warn!("mcp {}: cannot start: {text}", cfg.id);
+                self.stats.lock().entry(cfg.id.clone()).or_default().connect_failed = true;
                 self.record(&cfg.id, 0, Some(text), false);
                 // The error itself, so usage can tell a timeout from other failures.
                 return Err(e);
@@ -511,6 +537,7 @@ impl Gateway {
             }
             s.opens += 1;
             s.opened_at = Some(now_iso());
+            s.connect_failed = false;
         }
         let live =
             Arc::new(Live { client, bearer, last_used: Mutex::new(Instant::now()), inflight: AtomicUsize::new(0) });

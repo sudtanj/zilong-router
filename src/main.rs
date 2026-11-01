@@ -20,6 +20,7 @@ mod oauth;
 mod pricing;
 mod providers;
 mod router;
+mod skills;
 mod sse;
 mod state;
 mod token_saver;

@@ -27,13 +27,18 @@ pub struct Options {
     pub ponytail: Option<String>,
 }
 
+/// The request asked to skip every saver (and the skills index) with `OPT_OUT_HEADER: off`.
+pub fn opted_out(headers: &HeaderMap) -> bool {
+    headers
+        .get(OPT_OUT_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.trim().eq_ignore_ascii_case("off"))
+        .unwrap_or(false)
+}
+
 impl Options {
     pub fn from_settings(s: &Value, headers: &HeaderMap) -> Options {
-        let off = headers
-            .get(OPT_OUT_HEADER)
-            .and_then(|v| v.to_str().ok())
-            .map(|v| v.trim().eq_ignore_ascii_case("off"))
-            .unwrap_or(false);
+        let off = opted_out(headers);
         let flag = |k: &str, default: bool| !off && s.get(k).and_then(Value::as_bool).unwrap_or(default);
         let level = |k: &str| s.get(k).and_then(Value::as_str).unwrap_or("full");
         Options {

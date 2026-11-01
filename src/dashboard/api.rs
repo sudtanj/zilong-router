@@ -1,6 +1,7 @@
 //! JSON admin API behind the dashboard. Every handler is a thin wrapper over `Db`
 //! and the provider registry; the CLI uses the same helpers.
 
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -15,6 +16,7 @@ use time::OffsetDateTime;
 use crate::db::{now_iso, Db, ProviderConnection};
 use crate::mcp::{self, ServerConfig};
 use crate::providers::Registry;
+use crate::skills::{self, github};
 use crate::state::AppState;
 
 type S = State<Arc<AppState>>;
@@ -1166,4 +1168,140 @@ pub async fn mcp_import(State(state): S, Json(b): Json<McpImport>) -> R {
         }
     }
     Ok(Json(json!({"added": added, "skipped": skipped, "rejected": rejected})))
+}
+
+// ----- skills gateway ----------------------------------------------------------------
+
+/// Every skill (metadata only), the index switch and the size limits.
+pub async fn skills_list(State(state): S) -> R {
+    let list = skills::list(&state.db);
+    let used: usize = list.iter().map(|s| s.bytes).sum();
+    let enabled: Vec<skills::Skill> = list.iter().filter(|s| s.enabled).cloned().collect();
+    let index_on = state.db.settings().get(skills::INDEX_SETTING).and_then(Value::as_bool).unwrap_or(false);
+    Ok(Json(json!({
+        "skills": list,
+        "indexEnabled": index_on,
+        "indexPrompt": skills::index_prompt(&enabled),
+        "indexInjected": skills::injected(),
+        "bytes": used,
+        "maxSkillBytes": skills::MAX_SKILL_BYTES,
+        "maxTotalBytes": skills::MAX_TOTAL_BYTES,
+    })))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewSkill {
+    skill_md: String,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    /// Other files of the skill (path relative to its folder -> text).
+    #[serde(default)]
+    files: BTreeMap<String, String>,
+    /// `paste` (the default) or `upload` (a folder picked in the browser).
+    #[serde(default)]
+    source: Option<String>,
+}
+
+/// Adds a pasted SKILL.md, or a folder uploaded from the browser.
+pub async fn skills_add(State(state): S, Json(b): Json<NewSkill>) -> R {
+    let source = if b.source.as_deref() == Some("upload") { "upload" } else { "paste" };
+    let (name, description) = (b.name.as_deref(), b.description.as_deref());
+    let (skill, content) = skills::build(&b.skill_md, b.files, source.into(), name, description).map_err(bad)?;
+    let skill = skills::store(&state.db, skill, &content, None).map_err(bad)?;
+    Ok(Json(json!(skill)))
+}
+
+/// One skill with its SKILL.md and files, for the viewer.
+pub async fn skills_get(State(state): S, Path(id): Path<String>) -> R {
+    let skill = skills::get(&state.db, &id).ok_or_else(not_found)?;
+    let content = skills::content(&state.db, &id).unwrap_or_default();
+    let mut v = json!(skill);
+    v["skillMd"] = json!(content.skill_md);
+    v["fileContents"] = json!(content.files);
+    Ok(Json(v))
+}
+
+#[derive(Deserialize)]
+pub struct SkillPatch {
+    enabled: Option<bool>,
+    name: Option<String>,
+    description: Option<String>,
+}
+
+pub async fn skills_patch(State(state): S, Path(id): Path<String>, Json(b): Json<SkillPatch>) -> R {
+    let mut skill = skills::get(&state.db, &id).ok_or_else(not_found)?;
+    if let Some(on) = b.enabled {
+        skill.enabled = on;
+    }
+    if let Some(name) = b.name {
+        skill.name = name.trim().to_string();
+    }
+    if let Some(description) = b.description {
+        skill.description = description.trim().to_string();
+    }
+    skills::check_meta(&skill.name, &skill.description).map_err(bad)?;
+    if skills::name_taken(&skills::list(&state.db), &skill.name, Some(id.as_str())) {
+        return Err(bad(format!("a skill named `{}` already exists", skill.name)));
+    }
+    skill.updated_at = now_iso();
+    skills::save_meta(&state.db, &skill)?;
+    Ok(Json(json!(skill)))
+}
+
+pub async fn skills_delete(State(state): S, Path(id): Path<String>) -> R {
+    skills::get(&state.db, &id).ok_or_else(not_found)?;
+    skills::delete(&state.db, &id)?;
+    Ok(Json(json!({"ok": true})))
+}
+
+/// Fetches a GitHub skill again.
+pub async fn skills_update(State(state): S, Path(id): Path<String>) -> R {
+    let old = skills::get(&state.db, &id).ok_or_else(not_found)?;
+    let (skill, skipped) = github::update(&state.http, &state.db, &old).await.map_err(|e| bad(format!("{e:#}")))?;
+    Ok(Json(json!({"skill": skill, "skippedFiles": skipped})))
+}
+
+#[derive(Deserialize)]
+pub struct GithubImport {
+    url: String,
+    #[serde(default, rename = "ref")]
+    git_ref: Option<String>,
+    #[serde(default)]
+    path: Option<String>,
+    /// Folders to import (from the preview); the preview ignores it.
+    #[serde(default)]
+    dirs: Vec<String>,
+}
+
+impl GithubImport {
+    fn repo(&self) -> Result<github::Repo, AdminError> {
+        github::parse_url(&self.url, self.git_ref.as_deref(), self.path.as_deref()).map_err(bad)
+    }
+}
+
+/// The skills found in a repository, for the import checklist.
+pub async fn skills_github_preview(State(state): S, Json(b): Json<GithubImport>) -> R {
+    let repo = b.repo()?;
+    let mut v = github::preview(&state.http, &repo).await.map_err(|e| bad(format!("{e:#}")))?;
+    let existing = skills::list(&state.db);
+    if let Some(items) = v["skills"].as_array_mut() {
+        for item in items {
+            let taken = item["name"].as_str().is_some_and(|n| skills::name_taken(&existing, n, None));
+            item["exists"] = json!(taken);
+        }
+    }
+    Ok(Json(v))
+}
+
+/// Adds the skills in the picked folders of a repository.
+pub async fn skills_github_import(State(state): S, Json(b): Json<GithubImport>) -> R {
+    let repo = b.repo()?;
+    if b.dirs.is_empty() {
+        return Err(bad("pick at least one skill"));
+    }
+    let r = github::import(&state.http, &state.db, &repo, &b.dirs).await.map_err(|e| bad(format!("{e:#}")))?;
+    Ok(Json(r))
 }

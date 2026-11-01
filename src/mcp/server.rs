@@ -4,6 +4,11 @@
 //!   `list_servers`), so the agent's context holds four tool definitions however many
 //!   servers sit behind the gateway.
 //! * `POST /mcp/all`: every tool of every server, named `<server>__<tool>`.
+//! * `POST /skills`: only the skill tools.
+//!
+//! Once a skill is enabled, all three also offer `list_skills`, `load_skill` and
+//! `read_skill_file`, name the skills in their instructions and list them as prompts
+//! (see `crate::skills`).
 //!
 //! Authentication is the API key of `/v1` (or a loopback client when keys are not
 //! required); a restricted key only sees the servers on its allow list (`mcp/<id>`).
@@ -23,6 +28,7 @@ use serde_json::{json, Value};
 use super::usage::{self, Call};
 use super::{params_summary, search, tool_description, tool_name, ServerConfig, SEP};
 use crate::auth::{authenticate, AuthError, Caller};
+use crate::skills;
 use crate::state::AppState;
 
 const SUPPORTED_VERSIONS: [&str; 3] = ["2025-06-18", "2025-03-26", "2024-11-05"];
@@ -33,6 +39,8 @@ const MAX_LIMIT: usize = 50;
 enum Mode {
     Meta,
     All,
+    /// `/skills`: only the skill tools (see `crate::skills`).
+    Skills,
 }
 
 pub async fn meta(
@@ -53,6 +61,16 @@ pub async fn all(
     body: Bytes,
 ) -> Response {
     handle(state, peer, headers, uri, Mode::All, body).await
+}
+
+pub async fn skills(
+    State(state): State<Arc<AppState>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    uri: Uri,
+    body: Bytes,
+) -> Response {
+    handle(state, peer, headers, uri, Mode::Skills, body).await
 }
 
 /// No server-initiated stream and no sessions to end (both optional in the spec).
@@ -149,6 +167,8 @@ impl Ctx<'_> {
             "ping" => Ok(json!({})),
             "tools/list" => Ok(self.list_tools().await),
             "tools/call" => self.call(&params).await,
+            "prompts/list" => Ok(skills::prompts(&self.state.db)),
+            "prompts/get" => self.get_prompt(&params),
             _ => Err(RpcError(-32601, format!("method not found: {method}"))),
         };
         Some(match result {
@@ -170,7 +190,11 @@ impl Ctx<'_> {
             .iter()
             .map(|s| if s.description.is_empty() { s.id.clone() } else { format!("{} ({})", s.id, s.description) })
             .collect();
-        let instructions = match self.mode {
+        let skill_note = skills::instructions(&skills::enabled(&self.state.db));
+        let mut instructions = match self.mode {
+            Mode::Skills => {
+                "zilong-router skills gateway: packaged instructions and files for specific tasks.".to_string()
+            }
             Mode::Meta => format!(
                 "zilong-router MCP gateway in front of {} MCP server(s): {}. Their tools are not listed directly: \
                  call search_tools with what you want to do, get_tool_schemas for the exact parameters if needed, \
@@ -184,9 +208,14 @@ impl Ctx<'_> {
                 names.join(", ")
             ),
         };
+        match skill_note {
+            Some(s) => instructions = format!("{instructions}\n\n{s}"),
+            None if self.mode == Mode::Skills => instructions.push_str(" No skill is enabled yet."),
+            None => {}
+        }
         json!({
             "protocolVersion": version,
-            "capabilities": {"tools": {"listChanged": false}},
+            "capabilities": {"tools": {"listChanged": false}, "prompts": {"listChanged": false}},
             "serverInfo": {"name": "zilong-router", "version": env!("CARGO_PKG_VERSION")},
             "instructions": instructions,
         })
@@ -206,12 +235,32 @@ impl Ctx<'_> {
         (ok, failed)
     }
 
-    async fn list_tools(&self) -> Value {
-        if self.mode == Mode::Meta {
-            return json!({"tools": meta_tools()});
+    /// The skill tools, shown once a skill is enabled (always on `/skills`).
+    fn skill_tools(&self) -> Vec<Value> {
+        if self.mode == Mode::Skills || !skills::enabled(&self.state.db).is_empty() {
+            skills::tool_defs()
+        } else {
+            Vec::new()
         }
+    }
+
+    async fn list_tools(&self) -> Value {
+        let mut tools = match self.mode {
+            Mode::Skills => Vec::new(),
+            Mode::Meta => match meta_tools() {
+                Value::Array(tools) => tools,
+                _ => Vec::new(),
+            },
+            Mode::All => self.all_tools().await,
+        };
+        tools.extend(self.skill_tools());
+        json!({"tools": tools})
+    }
+
+    /// Every tool of every server this caller may use, named `server__tool`.
+    async fn all_tools(&self) -> Vec<Value> {
         let (catalogs, _) = self.catalogs(&self.servers()).await;
-        let tools: Vec<Value> = catalogs
+        catalogs
             .iter()
             .flat_map(|(server, tools)| {
                 tools.iter().map(move |t| {
@@ -221,20 +270,27 @@ impl Ctx<'_> {
                     t
                 })
             })
-            .collect();
-        json!({"tools": tools})
+            .collect()
     }
 
     async fn call(&self, params: &Value) -> Result<Value, RpcError> {
         let name = params.get("name").and_then(Value::as_str).ok_or_else(|| invalid("name is required"))?;
         let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
-        if self.mode == Mode::All {
-            let unknown = || invalid(format!("unknown tool: {name}"));
-            let (server, tool) = name.split_once(SEP).ok_or_else(unknown)?;
-            let cfg = self.servers().into_iter().find(|s| s.id == server).ok_or_else(unknown)?;
-            return Ok(self.call_upstream(&cfg, tool, args).await);
-        }
         let started = Instant::now();
+        if let Some(out) = skills::call_tool(&self.state.db, name, &args) {
+            self.record_meta(name, &args, &out, started);
+            return Ok(out);
+        }
+        match self.mode {
+            Mode::Meta => {}
+            Mode::Skills => return Err(invalid(format!("unknown tool: {name}"))),
+            Mode::All => {
+                let unknown = || invalid(format!("unknown tool: {name}"));
+                let (server, tool) = name.split_once(SEP).ok_or_else(unknown)?;
+                let cfg = self.servers().into_iter().find(|s| s.id == server).ok_or_else(unknown)?;
+                return Ok(self.call_upstream(&cfg, tool, args).await);
+            }
+        }
         let out = match name {
             "search_tools" => self.search_tools(&args).await,
             "get_tool_schemas" => self.get_tool_schemas(&args).await,
@@ -246,12 +302,30 @@ impl Ctx<'_> {
             "list_servers" => self.list_servers().await,
             _ => return Err(invalid(format!("unknown tool: {name}"))),
         };
-        let error = super::tool_error(&out);
-        let status = if error.is_some() { usage::TOOL_ERROR } else { usage::OK };
-        let (request_bytes, response_bytes) = (usage::json_len(&args), usage::json_len(&out));
-        let kind = usage::META;
-        self.record(Call { kind, server: None, tool: name, status, error, started, request_bytes, response_bytes });
+        self.record_meta(name, &args, &out, started);
         Ok(out)
+    }
+
+    /// `prompts/get`: an enabled skill as a prompt (counted like `load_skill`).
+    fn get_prompt(&self, params: &Value) -> Result<Value, RpcError> {
+        let started = Instant::now();
+        let name = params.get("name").and_then(Value::as_str).unwrap_or_default();
+        let result = skills::prompt(&self.state.db, name);
+        let out = match &result {
+            Ok(v) => v.clone(),
+            Err(e) => text_result(e.clone(), true),
+        };
+        self.record_meta("prompts/get", params, &out, started);
+        result.map_err(invalid)
+    }
+
+    /// Saves a usage row for a call the gateway answered itself.
+    fn record_meta(&self, tool: &str, args: &Value, out: &Value, started: Instant) {
+        let error = super::tool_error(out);
+        let status = if error.is_some() { usage::TOOL_ERROR } else { usage::OK };
+        let (request_bytes, response_bytes) = (usage::json_len(args), usage::json_len(out));
+        let kind = usage::META;
+        self.record(Call { kind, server: None, tool, status, error, started, request_bytes, response_bytes });
     }
 
     /// Saves a usage row for this caller.
@@ -259,6 +333,7 @@ impl Ctx<'_> {
         let endpoint = match self.mode {
             Mode::Meta => "/mcp",
             Mode::All => "/mcp/all",
+            Mode::Skills => "/skills",
         };
         usage::record(self.state, self.caller, endpoint, c);
     }

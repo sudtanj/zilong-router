@@ -960,3 +960,118 @@ async fn clients_sign_in_to_the_gateway_with_oauth() {
     let refresh = [("grant_type", "refresh_token"), ("refresh_token", renewed["refresh_token"].as_str().unwrap())];
     assert_eq!(token(&token_url, &refresh).await.0, 401);
 }
+
+// ----- skills gateway ----------------------------------------------------------------------
+
+const SKILL_MD: &str = "---\nname: release-notes\ndescription: >-\n  Write release notes from a git log.\n  Use for changelogs.\n---\n# Release notes\n\nGroup the commits by kind; see template.md.\n";
+
+fn tool_list(v: &Value) -> Vec<String> {
+    v["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect()
+}
+
+#[tokio::test]
+async fn skills_reach_clients_through_the_gateway() {
+    use reqwest::Method;
+    let router = start_router("skills", 300).await;
+    let base = router.base.as_str();
+
+    // No skill yet: the gateway looks as before.
+    assert!(!tool_list(&rpc(base, "/mcp", None, "tools/list", json!({})).await).contains(&"list_skills".to_string()));
+
+    // Paste a SKILL.md with one more file; bad paths and missing descriptions are refused.
+    let files = json!({"template.md": "## Added\n## Fixed\n"});
+    let skill = admin(Method::POST, base, "/skills", Some(json!({"skillMd": SKILL_MD, "files": files}))).await;
+    assert_eq!(
+        (&skill["id"], &skill["name"], &skill["enabled"]),
+        (&json!("release-notes"), &json!("release-notes"), &json!(true))
+    );
+    assert_eq!(skill["description"], "Write release notes from a git log. Use for changelogs.");
+    assert_eq!(skill["source"], "paste");
+    let refused = |body: Value| async move {
+        let resp = reqwest::Client::new().post(format!("{base}/api/admin/skills")).json(&body).send().await.unwrap();
+        resp.status().as_u16()
+    };
+    assert_eq!(refused(json!({"skillMd": "no frontmatter"})).await, 400);
+    assert_eq!(refused(json!({"skillMd": SKILL_MD, "files": {"../evil.sh": "x"}})).await, 400);
+    assert_eq!(refused(json!({"skillMd": SKILL_MD})).await, 400, "the name is taken");
+
+    let list = admin(Method::GET, base, "/skills", None).await;
+    assert_eq!(list["skills"].as_array().unwrap().len(), 1);
+    assert_eq!(list["skills"][0]["files"][0]["path"], "template.md");
+    let full = admin(Method::GET, base, "/skills/release-notes", None).await;
+    assert_eq!(
+        (&full["skillMd"], &full["fileContents"]["template.md"]),
+        (&json!(SKILL_MD), &json!("## Added\n## Fixed\n"))
+    );
+
+    // Over MCP: tools, instructions and prompts mention it.
+    let tools = tool_list(&rpc(base, "/mcp", None, "tools/list", json!({})).await);
+    for t in ["search_tools", "list_skills", "load_skill", "read_skill_file"] {
+        assert!(tools.contains(&t.to_string()), "{t} missing from {tools:?}");
+    }
+    let init = rpc(base, "/mcp", None, "initialize", json!({"protocolVersion": "2025-06-18"})).await;
+    let instructions = init["result"]["instructions"].as_str().unwrap();
+    assert!(
+        instructions.contains("load_skill") && instructions.contains("- release-notes: Write release notes"),
+        "{instructions}"
+    );
+    assert!(init["result"]["capabilities"]["prompts"].is_object(), "{init}");
+
+    let listed = parsed(&call(base, "/mcp", None, "list_skills", json!({})).await);
+    assert_eq!(listed["skills"], json!([{"name": "release-notes", "description": skill["description"], "files": 2}]));
+    let loaded = call(base, "/mcp", None, "load_skill", json!({"name": "release-notes"})).await;
+    let text = first_text(&loaded);
+    assert!(text.starts_with("# Skill: release-notes\n\n# Release notes"), "{text}");
+    assert!(
+        text.contains("Group the commits") && text.contains("- template.md (") && !text.contains("description:"),
+        "{text}"
+    );
+    let file =
+        call(base, "/mcp", None, "read_skill_file", json!({"name": "release-notes", "path": "template.md"})).await;
+    assert_eq!(first_text(&file), "## Added\n## Fixed\n");
+    let missing =
+        call(base, "/mcp", None, "read_skill_file", json!({"name": "release-notes", "path": "nope.md"})).await;
+    assert_eq!(missing["isError"], true);
+    assert_eq!(call(base, "/mcp", None, "load_skill", json!({"name": "other"})).await["isError"], true);
+
+    // The same tools on /mcp/all and /skills.
+    assert!(tool_list(&rpc(base, "/mcp/all", None, "tools/list", json!({})).await).contains(&"load_skill".to_string()));
+    let only = tool_list(&rpc(base, "/skills", None, "tools/list", json!({})).await);
+    assert_eq!(only, ["list_skills", "load_skill", "read_skill_file"]);
+    assert!(first_text(&call(base, "/skills", None, "load_skill", json!({"name": "Release-Notes"})).await)
+        .contains("Group"));
+
+    let prompts = rpc(base, "/mcp", None, "prompts/list", json!({})).await;
+    assert_eq!(prompts["result"]["prompts"][0]["name"], "release-notes");
+    let prompt = rpc(base, "/mcp", None, "prompts/get", json!({"name": "release-notes"})).await;
+    let prompt_text = prompt["result"]["messages"][0]["content"]["text"].as_str().unwrap_or_default();
+    assert!(prompt_text.contains("Group the commits"), "{prompt}");
+
+    // Counted as meta calls of the gateway.
+    let u = admin(Method::GET, base, "/mcp/usage?range=24h", None).await;
+    let loads = u["recent"].as_array().unwrap().iter().filter(|r| r["tool"] == "load_skill").count();
+    assert_eq!(loads, 3, "{u}");
+    assert!(u["totals"]["metaCalls"].as_i64().unwrap() >= 7, "{u}");
+
+    // Disabled: gone from every list.
+    admin(Method::PATCH, base, "/skills/release-notes", Some(json!({"enabled": false}))).await;
+    let tools = tool_list(&rpc(base, "/mcp", None, "tools/list", json!({})).await);
+    assert!(!tools.contains(&"load_skill".to_string()), "{tools:?}");
+    let listed = parsed(&call(base, "/mcp", None, "list_skills", json!({})).await);
+    assert_eq!(listed["skills"], json!([]));
+    assert_eq!(call(base, "/mcp", None, "load_skill", json!({"name": "release-notes"})).await["isError"], true);
+    let init = rpc(base, "/mcp", None, "initialize", json!({})).await;
+    assert!(!init["result"]["instructions"].as_str().unwrap().contains("release-notes"), "{init}");
+    assert_eq!(rpc(base, "/mcp", None, "prompts/list", json!({})).await["result"]["prompts"], json!([]));
+
+    // Edited, enabled again, then deleted.
+    let edited = Some(json!({"enabled": true, "description": "Changelogs from git history"}));
+    assert_eq!(
+        admin(Method::PATCH, base, "/skills/release-notes", edited).await["description"],
+        "Changelogs from git history"
+    );
+    let listed = parsed(&call(base, "/mcp", None, "list_skills", json!({})).await);
+    assert_eq!(listed["skills"][0]["description"], "Changelogs from git history");
+    admin(Method::DELETE, base, "/skills/release-notes", None).await;
+    assert_eq!(admin(Method::GET, base, "/skills", None).await["skills"], json!([]));
+}

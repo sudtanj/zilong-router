@@ -205,6 +205,11 @@ pub fn routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/mcp/usage", get(api::mcp_usage))
         .route("/mcp/clients", get(api::mcp_clients))
         .route("/mcp/clients/:id", delete(api::mcp_client_revoke))
+        .route("/skills", get(api::skills_list).post(api::skills_add))
+        .route("/skills/import/github/preview", post(api::skills_github_preview))
+        .route("/skills/import/github", post(api::skills_github_import))
+        .route("/skills/:id", get(api::skills_get).patch(api::skills_patch).delete(api::skills_delete))
+        .route("/skills/:id/update", post(api::skills_update))
         .route("/logout", post(api::logout))
         .route_layer(middleware::from_fn_with_state(state, guard))
         // Added after the guard layer, so these two stay public.

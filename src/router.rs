@@ -60,7 +60,7 @@ pub fn classify(status: u16, body: &str, level: i64) -> Verdict {
         }
     }
     match status {
-        401 | 402 | 403 | 404 => fixed(COOLDOWN_LONG_MS),
+        401..=404 => fixed(COOLDOWN_LONG_MS),
         429 => backoff(),
         400..=499 => Verdict::NoFallback,
         _ => fixed(TRANSIENT_COOLDOWN_MS),
@@ -93,6 +93,7 @@ pub struct RoundRobin {
     pub consecutive: i64,
 }
 
+#[allow(clippy::large_enum_variant)]
 pub enum Pick {
     Connection(ProviderConnection),
     /// Everything is cooling down; retry after this many seconds.

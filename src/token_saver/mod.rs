@@ -166,7 +166,7 @@ pub fn inject_system(body: &mut Value, target: Format, prompt: &str) {
         }
         return;
     }
-    let responses = !o.get("messages").map_or(false, Value::is_array);
+    let responses = !o.get("messages").is_some_and(Value::is_array);
     let Some(Value::Array(msgs)) = o.get_mut(if responses { "input" } else { "messages" }) else { return };
     let is_sys = |m: &Value| {
         let role = m.get("role").and_then(Value::as_str);
@@ -176,7 +176,7 @@ pub fn inject_system(body: &mut Value, target: Format, prompt: &str) {
     let present = msgs.iter().filter(|m| is_sys(m)).any(|m| match m.get("content") {
         Some(Value::String(s)) => has_prompt(s, prompt),
         Some(Value::Array(parts)) => {
-            parts.iter().any(|p| p.get("text").and_then(Value::as_str).map_or(false, |t| has_prompt(t, prompt)))
+            parts.iter().any(|p| p.get("text").and_then(Value::as_str).is_some_and(|t| has_prompt(t, prompt)))
         }
         _ => false,
     });

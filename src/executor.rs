@@ -269,7 +269,6 @@ pub async fn send(
     }
 }
 
-
 /// [`send`] through a host's [`Http`] client. `budget` counts the calls the host still
 /// allows (a Worker's subrequest limit); every attempt, retries included, uses one.
 /// The response comes back once its headers arrive with a 2xx status.

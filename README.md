@@ -393,6 +393,40 @@ cargo install cross && cross build --release --target aarch64-unknown-linux-musl
 CI (`.github/workflows/ci.yml`) runs fmt, clippy and tests, then builds static musl
 binaries for aarch64 and x86_64 and attaches them to tagged releases.
 
+## Library use (kongming-cloud)
+
+The crate is also a library (`zilong_router`), so a Cloudflare Worker
+(`kongming-cloud`, workers-rs, `wasm32-unknown-unknown`) can route requests with the
+same code:
+
+```toml
+zilong-router = { git = "https://github.com/sudtanj/zilong-router", default-features = false, features = ["worker"] }
+```
+
+- **Features.** `native` (default) is the binary: tokio, axum, reqwest, rusqlite, clap,
+  the dashboard, CLI, OAuth sign-in and refresh, the MCP gateway and the Turso mirror.
+  `worker` (or simply no `native`) is the portable core: provider registry and model
+  resolution (`providers`, `model`), translation across OpenAI / Anthropic / Responses
+  (`translator`, `sse`), account selection and cooldowns (`router`), the upstream call
+  (`executor`), pricing and usage (`pricing`, `usage`), Token Saver, and `engine`.
+  CI's `wasm-check` job builds it for wasm32 and fails if a server, TLS or SQLite crate
+  gets in.
+- **Host traits** (`host`). `Http` sends a request and returns the status, headers and
+  the body as a byte stream (`fetch` on a Worker), plus `sleep` for retries. `Store`
+  loads a `Snapshot` (settings, accounts, the caller's API key row, `kv` scopes) in one
+  call and writes cooldown patches and usage rows. `SqlStore` implements `Store` over any
+  SQLite-dialect executor (`Sql::batch`: D1, Turso / libSQL over HTTP) with the
+  binary's schema (`SqlStore::migrate` creates it). With `native` the traits are `Send`
+  (`#[async_trait]`); without it they are `?Send`, as wasm futures are.
+- **Entry point.** `engine::Engine::new(http, store, Limits::default())`, then
+  `engine.route(path, &headers, query, &body).await` for `/v1/chat/completions`,
+  `/v1/messages`, `/v1/responses` and `/v1/messages/count_tokens`; it returns a `Reply`
+  (status, headers, full body or byte stream). `Limits` caps upstream calls per request
+  (default 40, under Workers Free's 50 subrequests) and requires an API key by default.
+- **Native only.** OAuth token refresh and minted tokens (GitHub Copilot, MiMo free
+  tier), live `/models` discovery for `auto`, MCP OAuth tokens as API keys, the
+  dashboard, `/v1/models` and the stream stall timer.
+
 ## Benchmark
 
 The Benchmark workflow (`.github/workflows/bench.yml`) runs `tests/memory_bench.rs` on a

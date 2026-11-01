@@ -75,7 +75,7 @@ type Filter = (&'static str, fn(&str) -> String);
 pub fn compress_messages(body: &mut Value) -> Stats {
     let mut stats = Stats::default();
     let items = match body.as_object_mut() {
-        Some(o) if o.get("messages").map_or(false, Value::is_array) => o.get_mut("messages"),
+        Some(o) if o.get("messages").is_some_and(Value::is_array) => o.get_mut("messages"),
         Some(o) => o.get_mut("input"),
         None => None,
     };
@@ -256,7 +256,7 @@ fn hex_run(s: &str, ci: bool) -> Option<usize> {
 fn is_git_log_header_line(l: &str) -> bool {
     let rest = &l[graph_prefix_len(l)..];
     let Some(sha) = rest.strip_prefix("commit ") else { return false };
-    hex_run(sha, false).map_or(false, |n| n == sha.len())
+    hex_run(sha, false).is_some_and(|n| n == sha.len())
 }
 
 fn is_build_line(l: &str) -> bool {
@@ -323,7 +323,7 @@ fn is_path_like(l: &str) -> bool {
 }
 
 fn is_ls_total(l: &str) -> bool {
-    l.strip_prefix("total ").map_or(false, |r| !r.is_empty() && r.bytes().all(|b| b.is_ascii_digit()))
+    l.strip_prefix("total ").is_some_and(|r| !r.is_empty() && r.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// `^[-dlbcps][rwx-]{9}`
@@ -468,8 +468,7 @@ fn git_log(input: &str) -> String {
         let commit_hdr = {
             let g = graph_prefix_len(&lower);
             let rest = &lower[g..];
-            rest.strip_prefix("commit ").and_then(|sha| hex_run(sha, false).map(|n| (n, sha.len()))).map_or(
-                false,
+            rest.strip_prefix("commit ").and_then(|sha| hex_run(sha, false).map(|n| (n, sha.len()))).is_some_and(
                 |(n, len)| {
                     // `^commit <sha>$` without decoration; any tail is fine after decoration.
                     g > 0 || n == len
@@ -563,8 +562,8 @@ fn git_status(input: &str) -> String {
                 continue;
             }
         }
-        if raw.starts_with("##") {
-            branch = raw[2..].trim_start().to_string();
+        if let Some(rest) = raw.strip_prefix("##") {
+            branch = rest.trim_start().to_string();
             continue;
         }
         let b = raw.as_bytes();
@@ -670,7 +669,7 @@ fn build_output(input: &str) -> String {
             continue;
         }
         let low = trimmed.to_ascii_lowercase();
-        let word_ws = |w: &str| low.strip_prefix(w).map_or(false, |r| r.starts_with(char::is_whitespace));
+        let word_ws = |w: &str| low.strip_prefix(w).is_some_and(|r| r.starts_with(char::is_whitespace));
         if low.starts_with("npm err!") || low.starts_with("npm error") || low.starts_with("yarn error") {
             errors.push(line);
         } else if low.starts_with("npm warn deprecated") {
@@ -741,12 +740,12 @@ fn is_summary_line(low: &str) -> bool {
     for verb in ["added", "removed", "changed", "audited", "installed"] {
         if let Some(r) = low.strip_prefix(verb) {
             let r2 = r.trim_start();
-            if r2.len() < r.len() && num_then(r2).map_or(false, |x| x.starts_with("package")) {
+            if r2.len() < r.len() && num_then(r2).is_some_and(|x| x.starts_with("package")) {
                 return true;
             }
         }
     }
-    if low.strip_prefix("finished").map_or(false, |r| r.starts_with(char::is_whitespace)) {
+    if low.strip_prefix("finished").is_some_and(|r| r.starts_with(char::is_whitespace)) {
         return true;
     }
     if low.starts_with("build success")
@@ -760,7 +759,7 @@ fn is_summary_line(low: &str) -> bool {
             return true;
         }
     }
-    if low.strip_prefix("to address ").map_or(false, |r| r.contains(" issues")) {
+    if low.strip_prefix("to address ").is_some_and(|r| r.contains(" issues")) {
         return true;
     }
     low.starts_with("run `npm audit`")
@@ -986,7 +985,7 @@ fn ls(input: &str) -> String {
     }
     out += &format!("\nSummary: {} files, {} dirs", files.len(), dirs.len());
     if !by_ext.is_empty() {
-        by_ext.sort_by(|a, b| b.1.cmp(&a.1)); // stable, like Array.prototype.sort
+        by_ext.sort_by_key(|e| std::cmp::Reverse(e.1)); // stable, like Array.prototype.sort
         let parts: Vec<String> = by_ext.iter().take(LS_EXT_SUMMARY_TOP).map(|(e, c)| format!("{c} {e}")).collect();
         out += &format!(" ({}", parts.join(", "));
         if by_ext.len() > LS_EXT_SUMMARY_TOP {
@@ -1008,7 +1007,7 @@ fn tree(input: &str) -> String {
         }
         kept.push(line);
     }
-    while kept.last().map_or(false, |l| l.trim().is_empty()) {
+    while kept.last().is_some_and(|l| l.trim().is_empty()) {
         kept.pop();
     }
     if kept.len() > TREE_MAX_LINES {

@@ -405,7 +405,9 @@ mod native {
                     let mut rows = st.query(rusqlite::params_from_iter(args.iter()))?;
                     let mut res = Vec::new();
                     while let Some(r) = rows.next()? {
-                        res.push((0..n).map(|i| r.get::<_, SqlValue>(i).map(from_sql)).collect::<rusqlite::Result<_>>()?);
+                        res.push(
+                            (0..n).map(|i| r.get::<_, SqlValue>(i).map(from_sql)).collect::<rusqlite::Result<_>>()?,
+                        );
                     }
                     out.push(res);
                 }

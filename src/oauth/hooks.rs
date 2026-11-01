@@ -422,10 +422,11 @@ pub fn decloak_json(v: &mut Value, restore: &Restore) -> bool {
 
 /// Response fix-ups: Cline wraps non-streamed answers in `{success, data}`.
 pub fn fix_response(provider: &str, v: &mut Value) {
-    if provider == "cline" || provider == "clinepass" {
-        if v.get("choices").is_none() && v.pointer("/data/choices").is_some() {
-            *v = v["data"].take();
-        }
+    if (provider == "cline" || provider == "clinepass")
+        && v.get("choices").is_none()
+        && v.pointer("/data/choices").is_some()
+    {
+        *v = v["data"].take();
     }
 }
 

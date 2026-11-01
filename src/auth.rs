@@ -5,9 +5,9 @@
 
 use std::net::IpAddr;
 
-use http::HeaderMap;
 #[cfg(feature = "native")]
 use hmac::{Hmac, Mac};
+use http::HeaderMap;
 #[cfg(feature = "native")]
 use rand::{distributions::Alphanumeric, Rng};
 #[cfg(feature = "native")]

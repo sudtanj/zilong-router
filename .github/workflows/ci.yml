@@ -37,7 +37,7 @@ jobs:
             fmt.patch
             lock.patch
           if-no-files-found: ignore
-      - run: cargo clippy --all-targets
+      - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --locked
       - name: Fail on format or lockfile drift
         if: steps.fmt.outcome == 'failure' || steps.lock.outcome == 'failure'

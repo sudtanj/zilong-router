@@ -171,7 +171,10 @@ fn boxed(s: impl Stream<Item = Result<Bytes, String>> + 'static) -> ByteStream {
 /// provider call.
 pub fn count_tokens(body: &[u8]) -> Value {
     let v: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
-    let chars = ["system", "messages", "tools"].iter().map(|k| v.get(k).map(|x| x.to_string().len()).unwrap_or(0)).sum::<usize>();
+    let chars = ["system", "messages", "tools"]
+        .iter()
+        .map(|k| v.get(k).map(|x| x.to_string().len()).unwrap_or(0))
+        .sum::<usize>();
     json!({"input_tokens": chars.div_ceil(4)})
 }
 
@@ -379,7 +382,9 @@ impl<H: Http + 'static, S: Store + 'static> Engine<H, S> {
                 "auto-strong: no strong model is available. Add an account for a provider with strong models, \
                  or list models in settings.autoStrongModels",
             ),
-            None => Fail::new(404, "auto: no usable model. Add a provider account, or list models in settings.autoModels"),
+            None => {
+                Fail::new(404, "auto: no usable model. Add a provider account, or list models in settings.autoModels")
+            }
         })
     }
 
@@ -392,10 +397,9 @@ impl<H: Http + 'static, S: Store + 'static> Engine<H, S> {
     ) -> Result<Reply, Fail> {
         let source = cx.source;
         let settings = &cx.snap.settings;
-        let provider = self
-            .registry
-            .get(&resolved.provider)
-            .ok_or_else(|| Fail::new(404, format!("Unknown provider '{}' in model '{raw_model}'", resolved.provider)))?;
+        let provider = self.registry.get(&resolved.provider).ok_or_else(|| {
+            Fail::new(404, format!("Unknown provider '{}' in model '{raw_model}'", resolved.provider))
+        })?;
         if !cx.caller.may_use(&provider.id, &resolved.model) {
             return Err(Fail::new(403, format!("This API key may not use {}/{}", provider.id, resolved.model)));
         }
@@ -549,7 +553,8 @@ impl<H: Http + 'static, S: Store + 'static> Engine<H, S> {
                             return Err(Fail::new(status, format!("[{}/{}] {msg}", provider.id, resolved.model)));
                         }
                         Verdict::Fallback { .. } => {
-                            if let Some(patch) = router::unavailable_patch(&conn, &resolved.model, status, &msg, verdict)
+                            if let Some(patch) =
+                                router::unavailable_patch(&conn, &resolved.model, status, &msg, verdict)
                             {
                                 if let Err(e) = self.store.patch_connection_data(&conn.id, &patch).await {
                                     tracing::warn!("failed to persist lock for {}: {e}", conn.id);

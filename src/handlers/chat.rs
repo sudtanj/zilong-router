@@ -350,7 +350,7 @@ async fn attempt(
         let picked = match retry_with.take() {
             Some(c) => c,
             None => match router::pick(
-                &state,
+                state,
                 &provider.id,
                 &resolved.model,
                 &exclude,
@@ -387,7 +387,7 @@ async fn attempt(
         tried += 1;
         // Refresh tokens that are about to expire, mint per-request tokens (Copilot, MiMo).
         let picked_id = picked.id.clone();
-        let conn = match crate::oauth::prepare(&state, picked).await {
+        let conn = match crate::oauth::prepare(state, picked).await {
             Ok(c) => c,
             Err(e) => {
                 let msg = format!("credentials could not be renewed ({e}); sign in again");
@@ -404,11 +404,11 @@ async fn attempt(
             None => (&upstream_body, Restore::None),
         };
 
-        match executor::send(&state, provider, transport, &conn, &upstream_model, send_body, &headers, upstream_stream)
+        match executor::send(state, provider, transport, &conn, &upstream_model, send_body, headers, upstream_stream)
             .await
         {
             Ok(resp) => {
-                router::mark_success(&state, &conn, &resolved.model);
+                router::mark_success(state, &conn, &resolved.model);
                 tracing::info!(
                     "{endpoint} {}/{} via {} -> {} in {}ms{}",
                     provider.id,
@@ -440,7 +440,7 @@ async fn attempt(
             Err(e) => {
                 let (status, msg) = (e.status(), e.message());
                 if matches!(status, 401 | 403) && refreshed.insert(conn.id.clone()) {
-                    if let Some(fresh) = crate::oauth::force_refresh(&state, &conn).await {
+                    if let Some(fresh) = crate::oauth::force_refresh(state, &conn).await {
                         tracing::info!(
                             "{}/{}: {status} via {}, retrying with renewed credentials",
                             provider.id,
@@ -470,7 +470,7 @@ async fn attempt(
                         ));
                     }
                     Verdict::Fallback { .. } => {
-                        router::mark_unavailable(&state, &conn, &resolved.model, status, &msg, verdict);
+                        router::mark_unavailable(state, &conn, &resolved.model, status, &msg, verdict);
                         exclude.insert(conn.id.clone());
                         last_err = Some((status, msg));
                         if matches!(e, ExecError::Network(_)) && tried >= 3 {
@@ -646,4 +646,3 @@ fn stream_response(ctx: ReqCtx, resp: reqwest::Response) -> Response {
 
     sse_headers(Response::builder().status(200)).body(Body::from_stream(ReceiverStream::new(rx))).unwrap()
 }
-

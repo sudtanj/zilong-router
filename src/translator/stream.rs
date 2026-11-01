@@ -516,7 +516,7 @@ mod tests {
         assert_eq!(delta["delta"]["stop_reason"], "tool_use");
         assert_eq!(delta["usage"]["input_tokens"], 9);
         let args: Value = serde_json::from_str(
-            &out.iter().filter(|e| e.event.as_deref() == Some("content_block_delta")).last().unwrap().data,
+            &out.iter().rfind(|e| e.event.as_deref() == Some("content_block_delta")).unwrap().data,
         )
         .unwrap();
         assert_eq!(args["delta"]["partial_json"], "{\"a\":1}");

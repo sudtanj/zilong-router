@@ -124,7 +124,7 @@ pub fn run(cli: &Cli) -> anyhow::Result<bool> {
             let conns = db.all_connections()?;
             let mut list: Vec<_> = registry.all().iter().collect();
             list.sort_by(|a, b| a.priority.cmp(&b.priority).then(a.id.cmp(&b.id)));
-            println!("{:<24} {:<10} {:<8} {}", "ID", "FORMAT", "ACCTS", "NAME");
+            println!("{:<24} {:<10} {:<8} NAME", "ID", "FORMAT", "ACCTS");
             for p in list {
                 let n = conns.iter().filter(|c| c.provider == p.id).count();
                 let fmt = p.transport.as_ref().map(|t| t.format.as_str()).unwrap_or("-");
@@ -153,7 +153,7 @@ pub fn run(cli: &Cli) -> anyhow::Result<bool> {
                 println!("added {} account {}", conn.provider, conn.id);
             }
             ConnCmd::List => {
-                println!("{:<38} {:<20} {:<6} {:<8} {}", "ID", "PROVIDER", "ACTIVE", "PRIO", "NAME / STATUS");
+                println!("{:<38} {:<20} {:<6} {:<8} NAME / STATUS", "ID", "PROVIDER", "ACTIVE", "PRIO");
                 for c in db.all_connections()? {
                     let status = c.data.get("testStatus").and_then(Value::as_str).unwrap_or("ok");
                     let err = c.data.get("lastError").and_then(Value::as_str).unwrap_or("");

@@ -11,9 +11,10 @@ use serde_json::Value;
 pub const EMBEDDED_PROVIDERS: &str = include_str!("../data/providers.json");
 
 /// Wire format spoken by an upstream endpoint (or by a client).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Format {
+    #[default]
     Openai,
     Claude,
     Gemini,
@@ -32,12 +33,6 @@ impl Format {
     }
     pub fn supported(self) -> bool {
         matches!(self, Format::Openai | Format::Claude)
-    }
-}
-
-impl Default for Format {
-    fn default() -> Self {
-        Format::Openai
     }
 }
 
@@ -167,7 +162,7 @@ impl Provider {
     }
 
     pub fn model(&self, id: &str) -> Option<&ModelDef> {
-        let base = id.trim_end_matches(|c: char| c == ' ').to_string();
+        let base = id.trim_end_matches(' ').to_string();
         self.models.iter().find(|m| m.id == id || m.id == base)
     }
 

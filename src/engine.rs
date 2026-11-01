@@ -5,7 +5,8 @@
 //!
 //! The rules are the binary's (`handlers::chat`); what needs the native runtime is
 //! left out: OAuth token refresh and minted tokens (GitHub Copilot, MiMo free tier),
-//! live `/models` discovery for `auto`, MCP OAuth tokens as API keys, and the stream
+//! live `/models` discovery for accounts (OpenCode Free's list is opt-in, see
+//! [`Limits::free_models`]), MCP OAuth tokens as API keys, and the stream
 //! stall timer (the host's own limits apply instead).
 //!
 //! ```ignore
@@ -27,9 +28,10 @@ use web_time::Instant;
 use crate::auth::{extract_key, Caller};
 use crate::db::ProviderConnection;
 use crate::executor::{self, ExecError};
-use crate::host::{ByteStream, Http, HttpResponse, Snapshot, Store};
+use crate::host::{ByteStream, Http, HttpRequest, HttpResponse, Snapshot, Store};
 use crate::model::{self, AutoKind, Resolved};
 use crate::oauth::hooks::{self, Restore};
+use crate::oauth::opencode;
 use crate::pricing::Table;
 use crate::providers::{Format, Registry};
 use crate::router::{self, Pick, RoundRobin, Verdict};
@@ -65,12 +67,34 @@ pub struct Limits {
     /// Refuse requests without an API key. The binary lets keyless loopback callers
     /// through; a public host has no loopback, so this defaults to `true`.
     pub require_api_key: bool,
+    /// Offer OpenCode Free's live model list to `auto` (and [`Engine::models`]), as the
+    /// binary does. The list is fetched through [`Http`] (one upstream call) and kept in
+    /// the store's `kv` scope `modelCache` ([`Store::put_kv`]): 30 minutes, 5 after a
+    /// failed fetch. Off by default: the fetch needs a store that keeps the cache.
+    pub free_models: bool,
 }
 
 impl Default for Limits {
     fn default() -> Limits {
-        Limits { max_upstream_calls: 40, timeout_ms: 60_000, require_api_key: true }
+        Limits { max_upstream_calls: 40, timeout_ms: 60_000, require_api_key: true, free_models: false }
     }
+}
+
+/// `kv` scope of cached model lists and the key of OpenCode Free's.
+const MODEL_CACHE: &str = "modelCache";
+const OPENCODE_FREE_KEY: &str = "opencode:free";
+const FREE_TTL_OK_MS: i64 = 30 * 60_000;
+const FREE_TTL_ERR_MS: i64 = 5 * 60_000;
+const FREE_TIMEOUT_MS: u64 = 8_000;
+
+fn now_ms() -> i64 {
+    web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
+}
+
+/// Whether `auto` may use this provider here. MiMo's free tier needs a JWT minted by the
+/// binary (`oauth::hooks::mimo_jwt`); without `native` it can only fail.
+fn auto_usable(provider: &str) -> bool {
+    cfg!(feature = "native") || !hooks::is_mimo(provider)
 }
 
 /// An incoming API request.
@@ -219,7 +243,8 @@ impl<H: Http + 'static, S: Store + 'static> Engine<H, S> {
     }
 
     /// Dispatch by path: `/v1/chat/completions`, `/v1/messages`, `/v1/responses`,
-    /// `/v1/messages/count_tokens` (and the doubled `/v1/v1/…` forms). Anything else is 404.
+    /// `/v1/messages/count_tokens`, `/v1/models` (and the doubled `/v1/v1/…` forms). Anything
+    /// else is 404.
     pub async fn route(&self, path: &str, headers: &HeaderMap, query: Option<&str>, body: &[u8]) -> Reply {
         let p = path.strip_prefix("/v1").filter(|r| r.starts_with("/v1/")).unwrap_or(path);
         let req = |source| Request { source, endpoint: path, headers, query, body, caller: None };
@@ -227,6 +252,7 @@ impl<H: Http + 'static, S: Store + 'static> Engine<H, S> {
             "/v1/chat/completions" => self.chat(req(Format::Openai)).await,
             "/v1/messages" => self.chat(req(Format::Claude)).await,
             "/v1/responses" => self.responses(req(Format::Openai)).await,
+            "/v1/models" => self.models(req(Format::Openai)).await,
             "/v1/messages/count_tokens" => match self.authorize(&req(Format::Claude), &[]).await {
                 Ok(_) => Reply::json(200, &count_tokens(body)),
                 Err(e) => e.reply(Format::Claude),
@@ -265,10 +291,144 @@ impl<H: Http + 'static, S: Store + 'static> Engine<H, S> {
         }
     }
 
+    /// The `kv` scopes a chat or model list request reads.
+    fn scopes(&self) -> &'static [&'static str] {
+        if self.limits.free_models {
+            &["modelAliases", "customModels", "hiddenModels", MODEL_CACHE]
+        } else {
+            &["modelAliases", "customModels", "hiddenModels"]
+        }
+    }
+
+    /// OpenCode Free's chat models: the cached live list when fresh, else fetched now
+    /// (one upstream call from `budget`) and cached, plus the documented free models.
+    async fn opencode_free(&self, snap: &Snapshot, budget: &mut usize) -> Vec<String> {
+        let Some(url) = self.registry.get(opencode::ID).and_then(opencode::models_url) else {
+            return Vec::new();
+        };
+        let now = now_ms();
+        if let Some(c) = snap.kv.get(MODEL_CACHE).and_then(|m| m.get(OPENCODE_FREE_KEY)) {
+            let at = c.get("at").and_then(Value::as_i64).unwrap_or(0);
+            let list: Vec<String> = c
+                .get("models")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|m| m.as_str().map(str::to_string))
+                .collect();
+            let ttl = if list.is_empty() { FREE_TTL_ERR_MS } else { FREE_TTL_OK_MS };
+            if at <= now && now - at < ttl {
+                return opencode::with_documented(list);
+            }
+        }
+        if *budget == 0 {
+            return opencode::with_documented(Vec::new());
+        }
+        *budget -= 1;
+        let req = HttpRequest {
+            method: "GET".into(),
+            url,
+            headers: vec![
+                ("Authorization".into(), "Bearer public".into()),
+                ("User-Agent".into(), opencode::USER_AGENT.into()),
+            ],
+            body: Vec::new(),
+            timeout_ms: Some(FREE_TIMEOUT_MS),
+        };
+        let list = match self.http.send(req).await {
+            Ok(r) if (200..300).contains(&r.status) => match r.text().await {
+                Ok(t) => opencode::free_models(opencode::model_ids(&serde_json::from_str(&t).unwrap_or(Value::Null))),
+                Err(e) => {
+                    tracing::info!("auto: cannot read OpenCode Free's model list: {e}");
+                    Vec::new()
+                }
+            },
+            Ok(r) => {
+                tracing::info!("auto: OpenCode Free's model list answered {}", r.status);
+                Vec::new()
+            }
+            Err(e) => {
+                tracing::info!("auto: cannot list OpenCode Free models: {e}");
+                Vec::new()
+            }
+        };
+        let entry = json!({"at": now, "models": list});
+        if let Err(e) = self.store.put_kv(MODEL_CACHE, OPENCODE_FREE_KEY, &entry).await {
+            tracing::warn!("caching OpenCode Free's model list failed: {e}");
+        }
+        opencode::with_documented(list)
+    }
+
+    /// `auto` candidates in their natural order (rotation is left to the caller).
+    async fn auto_list(
+        &self,
+        snap: &Snapshot,
+        caller: &Caller,
+        source: Format,
+        explicit: &[String],
+        budget: &mut usize,
+    ) -> Vec<Resolved> {
+        let aliases = snap.scope("modelAliases");
+        let mut custom = snap.scope("customModels");
+        if explicit.is_empty() && self.limits.free_models && self.registry.get(opencode::ID).is_some() {
+            let free = self.opencode_free(snap, budget).await;
+            let entry = custom.entry(opencode::ID.to_string()).or_insert_with(|| Value::Array(Vec::new()));
+            if let Value::Array(list) = entry {
+                list.extend(free.into_iter().map(Value::String));
+            }
+        }
+        let mut candidates =
+            model::auto_candidates(self.registry, &aliases, &snap.connections, explicit, &custom, &HashMap::new());
+        if explicit.is_empty() {
+            let hidden = snap.scope("hiddenModels");
+            candidates.retain(|r| {
+                !model::is_hidden(&hidden, &model::hidden_keys(self.registry, &snap.connections, r), &r.model)
+            });
+        }
+        candidates.retain(|c| {
+            auto_usable(&c.provider)
+                && self.registry.get(&c.provider).is_some_and(|p| {
+                    caller.may_use(&p.id, &c.model)
+                        && p.transport_for(source, &c.model).map(|t| t.format.supported()).unwrap_or(false)
+                })
+        });
+        candidates
+    }
+
+    /// `GET /v1/models` in OpenAI's list shape: the `auto` models, then every model
+    /// `auto` could pick (as `alias/model`), then the model aliases.
+    pub async fn models(&self, req: Request<'_>) -> Reply {
+        let (snap, caller) = match self.authorize(&req, self.scopes()).await {
+            Ok(r) => r,
+            Err(e) => return e.reply(Format::Openai),
+        };
+        let mut budget = self.limits.max_upstream_calls;
+        let candidates = self.auto_list(&snap, &caller, Format::Openai, &[], &mut budget).await;
+        let entry = |id: String, owner: &str| json!({"id": id, "object": "model", "created": 0, "owned_by": owner});
+        let mut data: Vec<Value> = ["auto", "auto-strong", "auto-images"]
+            .iter()
+            .map(|id| entry(id.to_string(), "zilong-router"))
+            .collect();
+        let mut seen = HashSet::new();
+        for c in candidates {
+            let Some(p) = self.registry.get(&c.provider) else { continue };
+            let id = format!("{}/{}", p.alias, c.model);
+            if seen.insert(id.clone()) {
+                data.push(entry(id, &p.id));
+            }
+        }
+        for (alias, target) in snap.scope("modelAliases") {
+            let mut e = entry(alias, "alias");
+            e["alias_of"] = target;
+            data.push(e);
+        }
+        Reply::json(200, &json!({"object": "list", "data": data}))
+    }
+
     async fn chat_inner(&self, req: Request<'_>) -> Result<Reply, Fail> {
         let started = Instant::now();
         let source = req.source;
-        let (snap, caller) = self.authorize(&req, &["modelAliases", "customModels", "hiddenModels"]).await?;
+        let (snap, caller) = self.authorize(&req, self.scopes()).await?;
         let mut body: Value =
             serde_json::from_slice(req.body).map_err(|e| Fail::new(400, format!("invalid JSON body: {e}")))?;
         let raw_model = body
@@ -321,21 +481,7 @@ impl<H: Http + 'static, S: Store + 'static> Engine<H, S> {
         } else {
             requested
         };
-        let custom = snap.scope("customModels");
-        let mut candidates =
-            model::auto_candidates(self.registry, &aliases, &snap.connections, &explicit, &custom, &HashMap::new());
-        if explicit.is_empty() {
-            let hidden = snap.scope("hiddenModels");
-            candidates.retain(|r| {
-                !model::is_hidden(&hidden, &model::hidden_keys(self.registry, &snap.connections, r), &r.model)
-            });
-        }
-        candidates.retain(|c| {
-            self.registry.get(&c.provider).is_some_and(|p| {
-                caller.may_use(&p.id, &c.model)
-                    && p.transport_for(source, &c.model).map(|t| t.format.supported()).unwrap_or(false)
-            })
-        });
+        let mut candidates = self.auto_list(&snap, &caller, source, &explicit, &mut budget).await;
         match kind.score() {
             Some(score) if explicit.is_empty() => {
                 let top = model::best_first(&mut candidates, score);
@@ -975,5 +1121,39 @@ mod tests {
         h.insert("authorization", "Bearer sk-nope".parse().unwrap());
         assert_eq!(e.route("/v1/chat/completions", &h, None, body).await.status, 401);
         assert_eq!(e.route("/nope", &h, None, body).await.status, 404);
+    }
+
+    #[tokio::test]
+    async fn opencode_free_list_is_fetched_once_and_cached_in_kv() {
+        let dir = std::env::temp_dir().join(format!("zr-engine-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = SqlStore::new(Db::open(&dir.join("t.sqlite")).unwrap());
+        store.migrate().await.unwrap();
+        let http = fake(vec![(200, "application/json", r#"{"data":[{"id":"brand-new-free"},{"id":"gpt-5"}]}"#.into())]);
+        let e = Engine::new(http, store, Limits { free_models: true, ..open_limits() });
+        for _ in 0..2 {
+            let r = e.route("/v1/models", &HeaderMap::new(), None, b"").await;
+            assert_eq!(r.status, 200);
+            let v: Value = serde_json::from_str(&body_text(r).await).unwrap();
+            let ids: Vec<&str> = v["data"].as_array().unwrap().iter().filter_map(|m| m["id"].as_str()).collect();
+            assert_eq!(ids[0], "auto");
+            assert!(ids.contains(&"oc/brand-new-free"), "{ids:?}");
+            assert!(ids.contains(&"oc/big-pickle"), "{ids:?}");
+            assert!(!ids.contains(&"oc/gpt-5"), "{ids:?}");
+        }
+        // The second listing came from the kv cache.
+        let seen = e.http.seen.lock();
+        assert_eq!(seen.len(), 1);
+        assert!(seen[0].url.ends_with("/zen/v1/models"));
+        let cached = e.store.sql.kv_get(MODEL_CACHE, OPENCODE_FREE_KEY).unwrap().unwrap();
+        assert_eq!(cached["models"], json!(["brand-new-free"]));
+    }
+
+    #[tokio::test]
+    async fn free_models_are_off_by_default() {
+        let e = Engine::new(fake(vec![]), db(), open_limits());
+        let r = e.route("/v1/models", &HeaderMap::new(), None, b"").await;
+        assert_eq!(r.status, 200);
+        assert!(e.http.seen.lock().is_empty());
     }
 }

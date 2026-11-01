@@ -73,6 +73,12 @@ type Filter = (&'static str, fn(&str) -> String);
 /// (`tool_result` blocks; error results are left alone) and Responses
 /// (`function_call_output`).
 pub fn compress_messages(body: &mut Value) -> Stats {
+    compress_messages_max(body, RAW_CAP)
+}
+
+/// [`compress_messages`], leaving tool outputs over `max` bytes as they are, for hosts
+/// with a small CPU budget per request (a Cloudflare Worker).
+pub fn compress_messages_max(body: &mut Value, max: usize) -> Stats {
     let mut stats = Stats::default();
     let items = match body.as_object_mut() {
         Some(o) if o.get("messages").is_some_and(Value::is_array) => o.get_mut("messages"),
@@ -84,11 +90,11 @@ pub fn compress_messages(body: &mut Value) -> Stats {
         let Some(m) = msg.as_object_mut() else { continue };
         if m.get("type").and_then(Value::as_str) == Some("function_call_output") {
             match m.get_mut("output") {
-                Some(Value::String(s)) => compress_string(s, &mut stats),
+                Some(Value::String(s)) => compress_string(s, &mut stats, max),
                 Some(Value::Array(parts)) => {
                     for p in parts {
                         if p.get("type").and_then(Value::as_str) == Some("input_text") {
-                            compress_text_field(p, &mut stats);
+                            compress_text_field(p, &mut stats, max);
                         }
                     }
                 }
@@ -98,11 +104,11 @@ pub fn compress_messages(body: &mut Value) -> Stats {
         }
         let is_tool = m.get("role").and_then(Value::as_str) == Some("tool");
         match m.get_mut("content") {
-            Some(Value::String(s)) if is_tool => compress_string(s, &mut stats),
+            Some(Value::String(s)) if is_tool => compress_string(s, &mut stats, max),
             Some(Value::Array(parts)) if is_tool => {
                 for p in parts {
                     if p.get("type").and_then(Value::as_str) == Some("text") {
-                        compress_text_field(p, &mut stats);
+                        compress_text_field(p, &mut stats, max);
                     }
                 }
             }
@@ -114,11 +120,11 @@ pub fn compress_messages(body: &mut Value) -> Stats {
                         continue;
                     }
                     match b.get_mut("content") {
-                        Some(Value::String(s)) => compress_string(s, &mut stats),
+                        Some(Value::String(s)) => compress_string(s, &mut stats, max),
                         Some(Value::Array(parts)) => {
                             for p in parts {
                                 if p.get("type").and_then(Value::as_str) == Some("text") {
-                                    compress_text_field(p, &mut stats);
+                                    compress_text_field(p, &mut stats, max);
                                 }
                             }
                         }
@@ -132,20 +138,25 @@ pub fn compress_messages(body: &mut Value) -> Stats {
     stats
 }
 
-fn compress_text_field(part: &mut Value, stats: &mut Stats) {
+fn compress_text_field(part: &mut Value, stats: &mut Stats, max: usize) {
     if let Some(Value::String(s)) = part.get_mut("text") {
-        compress_string(s, stats);
+        compress_string(s, stats, max);
     }
 }
 
-fn compress_string(s: &mut String, stats: &mut Stats) {
-    if let Some(out) = compress_text(s, stats) {
+fn compress_string(s: &mut String, stats: &mut Stats, max: usize) {
+    if let Some(out) = compress_text_max(s, stats, max) {
         *s = out;
     }
 }
 
 /// Returns the compressed text, or `None` to keep the original.
 pub fn compress_text(text: &str, stats: &mut Stats) -> Option<String> {
+    compress_text_max(text, stats, RAW_CAP)
+}
+
+/// [`compress_text`], keeping outputs over `max` bytes as they are.
+pub fn compress_text_max(text: &str, stats: &mut Stats, max: usize) -> Option<String> {
     let n = text.len();
     stats.bytes_before += n;
     stats.outputs += 1;
@@ -153,7 +164,7 @@ pub fn compress_text(text: &str, stats: &mut Stats) -> Option<String> {
         stats.bytes_after += n;
         None
     };
-    if !(MIN_COMPRESS_SIZE..=RAW_CAP).contains(&n) {
+    if !(MIN_COMPRESS_SIZE..=RAW_CAP.min(max)).contains(&n) {
         return keep(stats);
     }
     let Some((name, f)) = auto_detect(text) else { return keep(stats) };
@@ -1143,5 +1154,16 @@ mod tests {
         assert_eq!(stats.hits.len(), 1);
         let out = body["messages"][0]["content"].as_str().unwrap();
         assert!(out.len() < 200);
+    }
+
+    #[test]
+    fn outputs_over_the_cap_are_left_alone() {
+        let big: String = (0..300).map(|_| "same noisy log line\n").collect();
+        let mut body = json!({"messages": [{"role": "tool", "tool_call_id": "1", "content": big.clone()}]});
+        let stats = compress_messages_max(&mut body, big.len() - 1);
+        assert!(stats.hits.is_empty());
+        assert_eq!(stats.outputs, 1);
+        assert_eq!(body["messages"][0]["content"], json!(big));
+        assert_eq!(compress_messages_max(&mut body, big.len()).hits.len(), 1);
     }
 }

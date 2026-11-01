@@ -20,9 +20,12 @@ pub const OPT_OUT_HEADER: &str = "x-9router-token-saver";
 const SEP: &str = "\n\n";
 
 /// Settings keys match upstream: `rtkEnabled` (default on), `cavemanEnabled`,
-/// `cavemanLevel` (default full), `ponytailEnabled`, `ponytailLevel` (default full).
+/// `cavemanLevel` (default full), `ponytailEnabled`, `ponytailLevel` (default full);
+/// `rtkMaxBytes` (not upstream) leaves tool outputs over that size uncompressed.
 pub struct Options {
     pub rtk: bool,
+    /// Largest tool output RTK looks at, in bytes.
+    pub rtk_max: usize,
     pub caveman: Option<String>,
     pub ponytail: Option<String>,
 }
@@ -38,6 +41,7 @@ impl Options {
         let level = |k: &str| s.get(k).and_then(Value::as_str).unwrap_or("full");
         Options {
             rtk: flag("rtkEnabled", true),
+            rtk_max: s.get("rtkMaxBytes").and_then(Value::as_u64).map_or(rtk::RAW_CAP, |n| n as usize),
             caveman: flag("cavemanEnabled", false).then(|| prompts::caveman(level("cavemanLevel"))).flatten(),
             ponytail: flag("ponytailEnabled", false).then(|| prompts::ponytail(level("ponytailLevel"))).flatten(),
         }
@@ -78,7 +82,7 @@ pub fn stats() -> Value {
 pub fn apply(body: &mut Value, target: Format, opts: &Options) {
     let mut flags: Vec<String> = Vec::new();
     if opts.rtk {
-        let s = rtk::compress_messages(body);
+        let s = rtk::compress_messages_max(body, opts.rtk_max);
         if s.outputs > 0 {
             TOOL_REQUESTS.fetch_add(1, Ordering::Relaxed);
             TOOL_OUTPUTS.fetch_add(s.outputs as u64, Ordering::Relaxed);

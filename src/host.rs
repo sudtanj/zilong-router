@@ -116,6 +116,12 @@ pub trait Store: MaybeSync {
     async fn patch_connection_data(&self, id: &str, patch: &Value) -> Result<()>;
     /// Append a `usageHistory` row and bump the lifetime request counter.
     async fn insert_usage(&self, row: &UsageRow) -> Result<()>;
+    /// Write one `kv` entry (`value` stored as JSON); the engine caches live model lists
+    /// in scope `modelCache` with it. A store without a cache may ignore it.
+    async fn put_kv(&self, scope: &str, key: &str, value: &Value) -> Result<()> {
+        let _ = (scope, key, value);
+        Ok(())
+    }
 }
 
 /// One SQL statement with positional (`?1`, `?2`, …) arguments.
@@ -291,6 +297,13 @@ impl<E: Sql> Store for SqlStore<E> {
         );
         self.sql.batch(vec![insert, counter]).await.map(|_| ())
     }
+
+    async fn put_kv(&self, scope: &str, key: &str, value: &Value) -> Result<()> {
+        let sql = "INSERT INTO kv(scope,key,value) VALUES(?1,?2,?3)
+                   ON CONFLICT(scope,key) DO UPDATE SET value=excluded.value";
+        let args = vec![json!(scope), json!(key), json!(value.to_string())];
+        self.sql.batch(vec![Stmt::new(sql, args)]).await.map(|_| ())
+    }
 }
 
 #[cfg(feature = "native")]
@@ -365,6 +378,10 @@ mod native {
 
         async fn insert_usage(&self, row: &UsageRow) -> Result<()> {
             Db::insert_usage(self, row)
+        }
+
+        async fn put_kv(&self, scope: &str, key: &str, value: &Value) -> Result<()> {
+            self.kv_set(scope, key, Some(value))
         }
     }
 

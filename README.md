@@ -420,12 +420,22 @@ zilong-router = { git = "https://github.com/sudtanj/zilong-router", default-feat
   (`#[async_trait]`); without it they are `?Send`, as wasm futures are.
 - **Entry point.** `engine::Engine::new(http, store, Limits::default())`, then
   `engine.route(path, &headers, query, &body).await` for `/v1/chat/completions`,
-  `/v1/messages`, `/v1/responses` and `/v1/messages/count_tokens`; it returns a `Reply`
-  (status, headers, full body or byte stream). `Limits` caps upstream calls per request
-  (default 40, under Workers Free's 50 subrequests) and requires an API key by default.
+  `/v1/messages`, `/v1/responses`, `/v1/messages/count_tokens` and `/v1/models`; it
+  returns a `Reply` (status, headers, full body or byte stream). `Limits` caps upstream
+  calls per request (default 40, under Workers Free's 50 subrequests) and requires an API
+  key by default.
+- **OpenCode Free.** It needs no account or token (`Authorization: Bearer public` and
+  the OpenCode CLI's headers). With `Limits { free_models: true, .. }`, `auto` and
+  `/v1/models` also offer its live free model list: `GET https://opencode.ai/zen/v1/models`
+  through `Http` (one upstream call), cached in the `kv` scope `modelCache` through
+  `Store::put_kv` (a no-op by default; `SqlStore` and the binary's `Db` write it) for
+  30 minutes (5 after a failure), plus the documented free models.
+- **Token Saver.** As in the binary (`rtkEnabled` and the other settings); the
+  `rtkMaxBytes` setting leaves tool outputs over that size uncompressed, to bound the CPU
+  a request spends on it.
 - **Native only.** OAuth token refresh and minted tokens (GitHub Copilot, MiMo free
-  tier), live `/models` discovery for `auto`, MCP OAuth tokens as API keys, the
-  dashboard, `/v1/models` and the stream stall timer.
+  tier; `auto` skips MiMo without `native`), live `/models` discovery for accounts, MCP
+  OAuth tokens as API keys, the dashboard and the stream stall timer.
 
 ## Benchmark
 

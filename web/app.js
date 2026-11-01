@@ -170,6 +170,7 @@ const PAGE_INFO = {
   usage: {title: 'Usage & Analytics', description: 'Monitor your API usage, token consumption, and request logs', icon: 'bar_chart'},
   'token-saver': {title: 'Token Saver', description: 'Compress prompts and outputs to save tokens', icon: 'savings'},
   mcp: {title: 'MCP Gateway', description: 'One MCP endpoint in front of all your MCP servers', icon: 'hub'},
+  skills: {title: 'Skills Gateway', description: 'Agent Skills for every client, switched on and off in one place', icon: 'psychology'},
   'console-log': {title: 'Console Log', description: 'Live server console output', icon: 'monitor'},
   profile: {title: 'Settings', description: 'Manage your preferences', icon: 'settings'},
 };
@@ -477,7 +478,7 @@ actions.setSetting = async ({key}, b) => {
   }
   const s = await patch('/settings', {[key]: next});
   settingsCache = s; b.setAttribute('aria-checked', String(next));
-  if (['requireLogin', 'fallbackStrategy', 'cavemanEnabled', 'ponytailEnabled'].includes(key)) reload();
+  if (['requireLogin', 'fallbackStrategy', 'cavemanEnabled', 'ponytailEnabled', 'skillsIndexEnabled'].includes(key)) reload();
 };
 actions.addKey = () => openModal({
   title: 'Create API Key',
@@ -796,6 +797,215 @@ actions.mcpImport = () => openModal({
     reload();
   },
 });
+
+// ----- Skills Gateway (zilong-router's own; no upstream page) ----------------------
+let skillCache = [];
+const skillPath = (id, rest = '') => '/skills/' + encodeURIComponent(id) + rest;
+const SKILL_PRE = 'border:1px solid var(--border);border-radius:8px;padding:10px;background:var(--surface-2);font-size:12px;max-height:420px;overflow:auto;white-space:pre-wrap;word-break:break-word;margin:0';
+// github:<owner>/<repo>/<path>@<ref> -> https://github.com/<owner>/<repo>/tree/<ref>/<path>
+const skillGithubUrl = (source) => {
+  const s = source.slice('github:'.length), at = s.lastIndexOf('@');
+  const parts = s.slice(0, at).split('/').map(encodeURIComponent);
+  return `https://github.com/${parts[0]}/${parts[1]}/tree/${encodeURIComponent(s.slice(at + 1))}/${parts.slice(2).join('/')}`;
+};
+pages.skills = async () => {
+  const d = await get('/skills');
+  skillCache = d.skills;
+  const copyRow = (label, value) => `<div class="row"><span class="codepill">${esc(label)}</span><input class="input mono grow" value="${esc(value)}" readonly>
+      <button class="tiny" data-act="copy" data-text="${esc(value)}" title="Copy">${ms('content_copy', 18)}</button></div>`;
+  const enabled = skillCache.filter((s) => s.enabled).length;
+  const buttons = `<button class="btn ghost" data-act="skillPaste">${ms('content_paste')}Paste SKILL.md</button><button class="btn ghost" data-act="skillUpload">${ms('drive_folder_upload')}Upload folder</button><button class="btn primary" data-act="skillGithub">${ms('download')}Import from GitHub</button>`;
+  return `<div class="page gap8">
+    <div class="card">
+      <h2 class="ct mb4">${ms('psychology')}Skills for every agent</h2>
+      <p class="sm muted mb4">Agent Skills are folders with a <code>SKILL.md</code> (a <code>name</code> and a <code>description</code> in its frontmatter, then instructions) and optional scripts and references, as in <a href="https://github.com/anthropics/skills" target="_blank" rel="noreferrer" style="color:var(--primary)">anthropics/skills</a>. Collect them here once; every agent connected to the MCP gateway gets the enabled ones through the tools <code>list_skills</code>, <code>load_skill</code> and <code>read_skill_file</code>. Only names and descriptions are shown up front (in the server instructions); an agent loads a skill's instructions when a task needs them.</p>
+      <div class="col gap2">${copyRow('MCP gateway', location.origin + '/mcp')}${copyRow('Skills only', location.origin + '/skills')}</div>
+      <p class="xs muted mt2">Connect it as shown on the <a href="#/mcp">MCP Gateway</a> page, with the same API keys. <code>/skills</code> offers only the three skill tools. The skills are also listed as MCP prompts, so clients with a prompt picker can insert one.</p>
+      <div class="row between wrap pt4 mt4" style="gap:16px;border-top:1px solid var(--border)">
+        <div class="grow" style="flex:1 1 220px;min-width:0">
+          <p class="medium">Add the skills index to chat requests</p>
+          <p class="sm muted">For agents that do not read MCP instructions: a short system-prompt block listing the enabled skills (name and description) is added to <code>/v1</code> chat, messages and responses requests, telling the model to load a skill with the zilong-router MCP <code>load_skill</code> tool. Off by default; skipped for requests sent with <code>x-9router-token-saver: off</code>.</p>
+        </div>
+        <div class="row gap3 shrink0">${toggle(d.indexEnabled, 'data-act="setSetting" data-key="skillsIndexEnabled"')}</div>
+      </div>
+      ${d.indexEnabled ? (d.indexPrompt
+        ? `<details class="mt2"><summary class="xs muted" style="cursor:pointer">What is added (${plural(d.indexInjected, 'request')} since start)</summary><pre class="mono mt2" style="${SKILL_PRE}">${esc(d.indexPrompt)}</pre></details>`
+        : '<p class="xs muted mt2">Nothing is added while no skill is enabled.</p>') : ''}
+    </div>
+    <div class="card">
+      <div class="row between wrap mb4" style="gap:8px"><h2 class="ct">${ms('extension')}Skills</h2><div class="row gap2 wrap">${buttons}</div></div>
+      ${skillCache.length === 0 ? `<div class="empty">
+          <div class="ring">${ms('psychology', 32)}</div>
+          <p class="medium" style="margin-bottom:4px">No skills yet</p>
+          <p class="sm muted mb4">Import them from a GitHub repository such as <code>anthropics/skills</code>, paste a SKILL.md, or upload a skill folder.</p>
+          <div class="row gap2 wrap" style="justify-content:center">${buttons}</div></div>`
+        : `<p class="xs muted mb2">${enabled} of ${plural(skillCache.length, 'skill')} enabled · ${fmtBytes(d.bytes)} of ${fmtBytes(d.maxTotalBytes)} used</p><div class="col">${skillCache.map(skillRow).join('')}</div>`}
+      <p class="xs muted mt4">Text files only, up to ${fmtBytes(d.maxSkillBytes)} per skill: images, fonts, PDFs and other binary files are skipped. Agents read a skill's scripts with <code>read_skill_file</code>; the router never runs them.</p>
+    </div>
+  </div>`;
+};
+function skillRow(s) {
+  const gh = s.source.startsWith('github:');
+  const kind = gh ? 'GitHub' : s.source === 'upload' ? 'Upload' : 'Paste';
+  const where = gh ? `<a href="${esc(skillGithubUrl(s.source))}" target="_blank" rel="noreferrer" class="mono" style="color:var(--primary)">${esc(s.source.slice(7))}</a>`
+    : s.source === 'upload' ? 'uploaded folder' : 'pasted';
+  return `<div class="keyrow ${s.enabled ? '' : 'off'}">
+    <div class="grow" style="min-width:0">
+      <div class="row wrap" style="gap:8px"><p class="sm medium">${esc(s.name)}</p>${s.id !== s.name ? `<code>${esc(s.id)}</code>` : ''}${badge(kind, 'primary')}</div>
+      <p class="xs muted mt1">${esc(s.description)}</p>
+      <p class="xs muted mt1">${plural(s.files.length + 1, 'file')} · ${fmtBytes(s.bytes)} · ${where} · updated ${relTime(s.updatedAt).toLowerCase()}</p>
+    </div>
+    <div class="row gap2 shrink0" style="padding-top:2px">
+      <button class="tiny" data-act="skillView" data-id="${esc(s.id)}" title="View">${ms('visibility', 18)}</button>
+      <button class="tiny" data-act="skillEdit" data-id="${esc(s.id)}" title="Edit name and description">${ms('edit', 18)}</button>
+      ${gh ? `<button class="tiny" data-act="skillUpdate" data-id="${esc(s.id)}" title="Update from GitHub">${ms('sync', 18)}</button>` : ''}
+      ${toggle(s.enabled, `data-act="skillToggle" data-id="${esc(s.id)}" title="${s.enabled ? 'Disable' : 'Enable'}"`)}
+      <button class="tiny red del" data-act="skillDelete" data-id="${esc(s.id)}" title="Delete" style="padding:8px">${ms('delete', 18)}</button>
+    </div>
+  </div>`;
+}
+actions.skillToggle = async ({id}, b) => { await patch(skillPath(id), {enabled: b.getAttribute('aria-checked') !== 'true'}); reload(); };
+actions.skillDelete = async ({id}) => {
+  const s = skillCache.find((x) => x.id === id);
+  if (await confirmModal({title: 'Delete skill', message: `Delete "${s.name}"? Agents can no longer load it.`, confirmText: 'Delete'})) { await del(skillPath(id)); reload(); }
+};
+actions.skillUpdate = async ({id}, b) => {
+  const icon = $('.ms', b); if (icon) icon.classList.add('spin');
+  try {
+    const r = await post(skillPath(id, '/update'));
+    notify('success', `${r.skill.name} updated from GitHub${r.skippedFiles.length ? `; skipped: ${r.skippedFiles.join(', ')}` : ''}`);
+  } finally { reload(); }
+};
+actions.skillView = async ({id}) => {
+  const s = await get(skillPath(id));
+  const files = Object.entries(s.fileContents || {});
+  openModal({
+    title: s.name, size: 'wide',
+    body: `<p class="sm muted mb2">${esc(s.description)}</p>
+      <p class="xs muted mono mb4">${esc(s.source)} · ${fmtBytes(s.bytes)}</p>
+      <p class="sm medium mb2">SKILL.md</p>
+      <pre class="mono" style="${SKILL_PRE}">${esc(s.skillMd)}</pre>
+      ${files.map(([path, text]) => `<details class="mt2"><summary class="sm mono" style="cursor:pointer">${esc(path)} <span class="xs muted">${fmtBytes(text.length)}</span></summary><pre class="mono mt2" style="${SKILL_PRE}">${esc(text)}</pre></details>`).join('')}`,
+  });
+};
+actions.skillEdit = ({id}) => {
+  const s = skillCache.find((x) => x.id === id);
+  openModal({
+    title: 'Edit ' + s.name,
+    body: field('name', 'Name', {value: s.name, required: true})
+      + field('description', 'Description', {type: 'textarea', rows: 4, value: s.description, hint: 'Agents pick a skill by its description: say what it does and when to use it.'})
+      + twoButtons('Save'),
+    onSubmit: async (f) => {
+      await patch(skillPath(id), {name: f.name.value.trim(), description: f.description.value.trim()});
+      notify('success', 'Skill saved'); reload();
+    },
+  });
+};
+actions.skillPaste = () => openModal({
+  title: 'Paste a SKILL.md', size: 'wide',
+  body: field('md', 'SKILL.md', {type: 'textarea', rows: 14,
+      placeholder: '---\nname: release-notes\ndescription: Write release notes from a git log. Use when asked for a changelog or release notes.\n---\n\n# Release notes\n\n1. …',
+      hint: 'The frontmatter between the <code>---</code> lines needs a <code>name</code> and a <code>description</code>, or fill them in below.'})
+    + `<div class="row gap2" style="align-items:flex-start"><div class="grow">${field('name', 'Name (optional)', {placeholder: 'from the frontmatter'})}</div>
+      <div class="grow">${field('description', 'Description (optional)', {placeholder: 'from the frontmatter'})}</div></div>`
+    + twoButtons('Add skill'),
+  onSubmit: async (f) => {
+    const s = await post('/skills', {skillMd: f.md.value, name: f.name.value.trim() || null, description: f.description.value.trim() || null});
+    notify('success', `Skill "${s.name}" added`); reload();
+  },
+});
+// A folder picked in the browser: every SKILL.md in it starts a skill (the folder itself,
+// or its subfolders), text files are read here and binary ones skipped.
+actions.skillUpload = () => {
+  const input = document.createElement('input');
+  input.type = 'file'; input.multiple = true; input.webkitdirectory = true;
+  input.onchange = () => uploadSkillFolder([...input.files]).catch(fail);
+  input.click();
+};
+async function uploadSkillFolder(files) {
+  const rel = (f) => (f.webkitRelativePath || f.name).split('/').slice(1).join('/');
+  const dirOf = (p) => p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '';
+  const dirs = files.map(rel).filter((p) => p === 'SKILL.md' || p.endsWith('/SKILL.md')).map(dirOf);
+  if (!dirs.length) throw new Error('The folder has no SKILL.md');
+  const owner = (p) => dirs.filter((d) => d === '' || p.startsWith(d + '/')).sort((a, b) => b.length - a.length)[0];
+  const decoder = new TextDecoder('utf-8', {fatal: true});
+  const added = [], failed = [], skipped = [];
+  for (const dir of dirs) {
+    const pre = dir ? dir + '/' : '';
+    let skillMd = '', budget = 1048576;
+    const out = {};
+    for (const f of files) {
+      const p = rel(f);
+      if (owner(p) !== dir || p.split('/').some((seg) => seg === '.git' || seg === 'node_modules' || seg === '__pycache__')) continue;
+      const inner = p.slice(pre.length);
+      if (f.size > budget) { skipped.push(p); continue; }
+      let text;
+      try { text = decoder.decode(await f.arrayBuffer()); } catch { skipped.push(p); continue; }
+      if (text.includes('\0')) { skipped.push(p); continue; }
+      if (inner === 'SKILL.md') skillMd = text; else out[inner] = text;
+      budget -= f.size;
+    }
+    try { added.push((await post('/skills', {skillMd, files: out, source: 'upload'})).name); }
+    catch (e) { failed.push(`${dir || 'SKILL.md'}: ${e.message}`); }
+  }
+  if (added.length) notify('success', `Added ${added.join(', ')}${skipped.length ? `; skipped binary or large files: ${skipped.slice(0, 8).join(', ')}${skipped.length > 8 ? '…' : ''}` : ''}`);
+  if (failed.length) notify('error', failed.join('; '));
+  reload();
+}
+function skillChecklist(r) {
+  const where = esc(r.repo + (r.path ? '/' + r.path : ''));
+  if (!r.skills.length) return `<p class="sm muted mb4">No SKILL.md found in <code>${where}</code> at <code>${esc(r.ref)}</code>.</p>`;
+  return `<div class="row between mb2" style="gap:8px"><p class="sm medium">${plural(r.skills.length, 'skill')} in <code>${where}</code> at <code>${esc(r.ref)}</code></p>
+      <label class="xs row" style="gap:6px;cursor:pointer"><input type="checkbox" data-all>Select all</label></div>
+    ${r.truncated ? '<p class="xs danger mb2">GitHub cut the file list short (a very large repository): enter a folder to see all of its skills.</p>' : ''}
+    <div class="col mb4" style="max-height:340px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:0 10px">
+    ${r.skills.map((s) => `<label class="row" style="gap:10px;padding:8px 0;border-bottom:1px solid var(--divider);align-items:flex-start;cursor:pointer">
+      <input type="checkbox" name="dir" value="${esc(s.dir)}" ${s.exists || s.error ? '' : 'checked'} ${s.error ? 'disabled' : ''} style="margin-top:3px">
+      <div class="grow" style="min-width:0">
+        <p class="sm medium">${esc(s.name || s.dir)} ${s.exists ? badge('Already added', 'warning') : ''}</p>
+        <p class="xs muted mono">${esc(s.dir || '(repository root)')} · ${plural(s.files, 'file')}, ${fmtBytes(s.bytes)}</p>
+        ${s.description ? `<p class="xs muted mt1">${esc(s.description.length > 240 ? s.description.slice(0, 240) + '…' : s.description)}</p>` : ''}
+        ${s.error ? `<p class="xs danger mt1">${esc(s.error)}</p>` : ''}
+      </div></label>`).join('')}</div>`;
+}
+actions.skillGithub = () => {
+  let found = null;
+  const {form} = openModal({
+    title: 'Import skills from GitHub', size: 'wide',
+    body: field('url', 'Repository', {value: 'https://github.com/anthropics/skills', placeholder: 'https://github.com/owner/repo', required: true, mono: true,
+        hint: 'A repository or a folder in it (<code>…/tree/main/skills</code>). Every folder holding a SKILL.md is a skill. Private repositories need <code>GITHUB_TOKEN</code> in the router\'s environment.'})
+      + `<div class="row gap2" style="align-items:flex-start"><div class="grow">${field('ref', 'Branch, tag or commit', {placeholder: 'default branch', mono: true})}</div>
+        <div class="grow">${field('path', 'Folder', {placeholder: 'whole repository', mono: true})}</div></div>
+      <div id="skill-found"></div>` + twoButtons('Find skills'),
+    onSubmit: async (f) => {
+      const req = {url: f.url.value.trim(), ref: f.ref.value.trim() || null, path: f.path.value.trim() || null};
+      const submit = $('[type=submit]', f);
+      if (!found) {
+        const r = await post('/skills/import/github/preview', req);
+        found = req;
+        $('#skill-found').innerHTML = skillChecklist(r);
+        const all = $('[data-all]', f);
+        if (all) all.onchange = () => $$('input[name=dir]:not(:disabled)', f).forEach((c) => (c.checked = all.checked));
+        submit.textContent = r.skills.length ? 'Import selected' : 'Find skills';
+        if (!r.skills.length) found = null;
+        submit.disabled = false;
+        return false;
+      }
+      const dirs = $$('input[name=dir]:checked', f).map((c) => c.value);
+      if (!dirs.length) { submit.disabled = false; throw new Error('Pick at least one skill'); }
+      const res = await post('/skills/import/github', {...found, dirs});
+      const msg = [res.added.length ? `Added ${res.added.join(', ')}` : 'Nothing added',
+        res.skippedFiles.length ? `skipped files: ${res.skippedFiles.slice(0, 8).join(', ')}${res.skippedFiles.length > 8 ? '…' : ''}` : '',
+        res.errors.length ? `errors: ${res.errors.join('; ')}` : ''].filter(Boolean).join('; ');
+      notify(res.errors.length && !res.added.length ? 'error' : 'success', msg);
+      reload();
+    },
+  });
+  // Changing the repository, ref or folder starts over with a new search.
+  ['url', 'ref', 'path'].forEach((n) => form[n].addEventListener('input', () => {
+    found = null; $('#skill-found').innerHTML = ''; $('[type=submit]', form).textContent = 'Find skills';
+  }));
+};
 
 // ----- Providers (upstream providers/page.js) --------------------------------------
 let provCache = null, connCache = null;

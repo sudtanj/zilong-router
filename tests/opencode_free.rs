@@ -326,3 +326,35 @@ async fn clean_up_hides_failing_models_and_refresh_brings_them_back() {
     assert_eq!(admin(Method::DELETE, base, "/models/oc/hidden", None).await, json!([]));
     assert!(provider_models(base, "opencode").await.iter().any(|m| m == "beam-free"));
 }
+
+#[tokio::test]
+async fn skills_index_is_added_to_chat_requests_when_switched_on() {
+    use reqwest::Method;
+    let mock = Mock { live: Some(vec!["big-pickle"]), ..Default::default() };
+    let router = start_router("skills", &start_mock(mock.clone()).await).await;
+    let base = router.base.as_str();
+    let md = "---\nname: haiku-writer\ndescription: Write haiku about code\n---\nFive, seven, five.";
+    admin(Method::POST, base, "/skills", Some(json!({"skillMd": md}))).await;
+    let http = reqwest::Client::new();
+    let body = json!({"model": "oc/exo-free", "messages": [{"role": "user", "content": "ping"}]});
+    let ask = || http.post(format!("{base}/v1/chat/completions")).json(&body).send();
+
+    // Off by default.
+    assert_eq!(ask().await.unwrap().status(), 200);
+    admin(Method::PATCH, base, "/settings", Some(json!({"skillsIndexEnabled": true}))).await;
+    assert_eq!(ask().await.unwrap().status(), 200);
+    // Skipped with the token saver's opt-out header, like the savers.
+    let opted_out = http.post(format!("{base}/v1/chat/completions")).header("x-9router-token-saver", "off").json(&body);
+    assert_eq!(opted_out.send().await.unwrap().status(), 200);
+    let shown = admin(Method::GET, base, "/skills", None).await;
+    assert_eq!((&shown["indexEnabled"], &shown["indexInjected"]), (&json!(true), &json!(1)), "{shown}");
+
+    let chats = mock.chats.lock().unwrap();
+    assert_eq!(chats.len(), 3);
+    let messages = |i: usize| chats[i].1["messages"].to_string();
+    assert!(!messages(0).contains("haiku-writer"), "{}", messages(0));
+    let with = messages(1);
+    assert!(with.contains("- haiku-writer: Write haiku about code") && with.contains("load_skill"), "{with}");
+    assert_eq!(chats[1].1["messages"][0]["role"], "system", "{with}");
+    assert!(!messages(2).contains("haiku-writer"), "{}", messages(2));
+}

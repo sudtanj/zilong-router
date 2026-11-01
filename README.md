@@ -31,6 +31,9 @@ Orange Pi Zero 3:
   Composio-style meta tools (search, schema, call) so the agent's context holds four tool
   definitions instead of hundreds; Claude, ChatGPT and Cursor connectors sign in to it with
   OAuth. See [MCP gateway](#mcp-gateway).
+- A Skills Gateway: Agent Skills (SKILL.md folders, imported from GitHub, pasted or
+  uploaded) switched on and off in the dashboard and served to every agent through the
+  MCP gateway. See [Skills Gateway](#skills-gateway).
 - A port of the 9router web dashboard, served by the same binary with no Node and no
   build step.
 - Usage and cost per request in SQLite, priced from upstream's pricing table, with
@@ -292,6 +295,64 @@ by clients that reach the router from elsewhere.
 - Server definitions live in the `kv` table (scopes `mcpServers` and `mcpTools`), so the
   Turso mirror carries them.
 
+## Skills Gateway
+
+One place for [Agent Skills](https://github.com/anthropics/skills): folders with a
+`SKILL.md` (YAML frontmatter with a `name` and a `description`, then instructions) and
+optional scripts, references and templates. Add them on the dashboard's **Skills Gateway**
+page and switch each one on or off, like the Token Saver features. Every client of the
+router then gets the enabled skills through one gateway:
+
+- **MCP** (`/mcp` and `/mcp/all`): once a skill is enabled, three more tools appear next
+  to the meta tools. `/skills` is the same endpoint with only these three tools.
+
+  | Tool | What it does |
+  |---|---|
+  | `list_skills` | Name and description of each enabled skill. |
+  | `load_skill` | `name`: the skill's SKILL.md (without the frontmatter) and the list of its other files. |
+  | `read_skill_file` | `name`, `path`: one file of the skill, e.g. `scripts/fill.py` (or `SKILL.md`). |
+
+  Progressive disclosure, as in Claude's own skills: the `initialize` instructions name
+  the enabled skills with a short description and tell the agent to load one before a
+  task it covers; the body is only read when needed. Enabled skills are also MCP prompts
+  (`prompts/list`, `prompts/get`). Skill calls are counted in the MCP usage as meta calls.
+  The router never runs a skill's scripts; agents read them and run them where they work.
+- **Skills index in chat requests** (`skillsIndexEnabled`, off by default): for agents
+  that do not read MCP instructions, `/v1/chat/completions`, `/v1/messages` and
+  `/v1/responses` requests get a compact system-prompt block listing the enabled skills
+  (name and description) and saying to load one with the zilong-router MCP `load_skill`
+  tool. The header `x-9router-token-saver: off` skips it for one request.
+
+Adding skills:
+
+- **Import from GitHub**: a repository URL (`https://github.com/anthropics/skills`), or a
+  folder in it (`…/tree/main/skills`), with an optional branch, tag or commit and folder.
+  The git trees API lists the repository in one request; every folder holding a SKILL.md
+  is offered in a checklist, and the picked ones are downloaded from
+  raw.githubusercontent.com. **Update** fetches a GitHub skill again (its switch is kept).
+  Set `GITHUB_TOKEN` in the router's environment for private repositories or a higher
+  API rate limit.
+- **Paste a SKILL.md**: a single-file skill (name and description can be typed in when
+  the text has no frontmatter).
+- **Upload a folder** from the browser: every SKILL.md in it starts a skill. There is no
+  `.zip` upload (it would need a zip library in the binary); unpack the archive and
+  upload the folder instead.
+
+Limits and storage: names up to 64 characters (the id is the name in lowercase with
+dashes), descriptions up to 1024; text files only (images, fonts, PDFs and other binary
+files are skipped), 1 MB per skill and 10 MB in total; file paths must stay inside the
+skill folder (no absolute paths, `..`, backslashes or drive letters). Skills live in the
+`kv` table (scope `skills` for the metadata, `skillFiles` for the content), so the Turso
+mirror carries them (the mirror keeps a copy of the `kv` rows in memory to spot changes, so
+size the collection for the board). Every API key reaches every enabled skill; per-key restrictions only
+apply to MCP servers.
+
+Admin API (`/api/admin`): `GET /skills`, `POST /skills` (`{skillMd, name?, description?,
+files?}`), `GET|PATCH|DELETE /skills/:id` (`{enabled?, name?, description?}`),
+`POST /skills/:id/update`, `POST /skills/import/github/preview` and
+`POST /skills/import/github` (`{url, ref?, path?, dirs}`); the index switch is the
+`skillsIndexEnabled` setting (`PATCH /settings`).
+
 ## Dashboard
 
 Open `http://pi:20128/` in a browser. The dashboard is a faithful port of 9router's
@@ -320,6 +381,9 @@ Pages, matching upstream's sidebar:
 - **Usage**: Today / 24h / 7D / 30D / 60D / All periods, overview cards, providers and
   recent requests, tokens / requests / cost chart, provider and model breakdowns, and
   the grouped, sortable table by model, account, API key or endpoint in costs or tokens.
+- **Skills Gateway**: add Agent Skills (GitHub import with a checklist, paste, folder
+  upload), switch each on or off, view, edit, update from GitHub or delete them, and the
+  *Add the skills index to chat requests* switch. See [Skills Gateway](#skills-gateway).
 - **Console Log** (Debug): the last 200 lines of the router log, refreshed every 1.5s
   (polled rather than upstream's SSE stream), coloured by level, with *Clear*. Every
   answered request is logged as `endpoint provider/model via account -> status in Nms`.
@@ -339,8 +403,8 @@ Pages, matching upstream's sidebar:
 
 Upstream features that zilong-router does not implement are left out of the sidebar
 rather than shown dead: Combos, Quota Tracker, Token Saver, CLI Tools, Media
-Providers, Proxy Pools, Skills, tunnels and SSO. Model aliases are managed with the
-CLI (`zilong-router alias`).
+Providers, Proxy Pools, tunnels and SSO (upstream's Skills page is replaced by the Skills
+Gateway). Model aliases are managed with the CLI (`zilong-router alias`).
 
 Fonts and icons (Inter and Material Symbols) load from Google Fonts like upstream;
 without internet the UI falls back to system fonts and shows icon names as text.
@@ -498,7 +562,7 @@ opens, and every sync interval (plus once on clean shutdown) pushes changes back
 
 Planned, roughly in order of interest. Nothing here is implemented yet.
 
-- MCP gateway: resources and prompts next to tools.
+- MCP gateway: resources next to tools and prompts.
 - Gemini wire format (`/v1beta/models/...:generateContent`).
 - Model combos (one name that falls back through a list of provider/model pairs).
 - Embeddings, image and audio endpoints.

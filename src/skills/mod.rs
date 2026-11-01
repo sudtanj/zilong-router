@@ -265,7 +265,7 @@ pub fn list(db: &Db) -> Vec<Skill> {
             Some(s)
         })
         .collect();
-    list.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    list.sort_by_key(|a| a.name.to_lowercase());
     list
 }
 

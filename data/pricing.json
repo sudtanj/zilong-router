@@ -1,8 +1,8 @@
 {
  "meta": {
-  "upstreamVersion": "0.5.111",
-  "upstreamCommit": "3a978a631ad65529c06e48ce495092d5bba29f46",
-  "generatedAt": "2026-10-26"
+  "upstreamVersion": "0.5.112",
+  "upstreamCommit": "1fe586bb1cf35e1ed0cb2150a8ef7d1db040b21d",
+  "generatedAt": "2026-11-02"
  },
  "freeNamespaces": [
   "cline-free/"
@@ -431,6 +431,14 @@
    "cached": 0.1,
    "reasoning": 10,
    "cache_creation": 2.5
+  },
+  {
+   "model": "gpt-6.1-terra",
+   "input": 1,
+   "output": 5,
+   "cached": 0.05,
+   "reasoning": 5,
+   "cache_creation": 1.25
   },
   {
    "model": "gpt-6-sol",

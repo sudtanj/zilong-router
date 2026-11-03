@@ -1337,3 +1337,47 @@ async fn direct_servers_come_first_and_fall_back_to_nested_gateways() {
     let use_case = nest.calls_to("COMPOSIO_SEARCH_TOOLS").last().unwrap()["queries"][0]["use_case"].clone();
     assert_eq!(use_case, "github: list issues");
 }
+
+#[tokio::test]
+async fn zilong_control_server_is_opt_in_per_key_and_never_leaks_secrets() {
+    let router = start_router("control", 300).await;
+    let base = router.base.as_str();
+    let secret = "sk-supersecret-0123456789abcdef0123456789";
+    admin(
+        reqwest::Method::POST,
+        base,
+        "/connections",
+        Some(json!({"provider": "openai", "apiKey": secret, "name": "main"})),
+    )
+    .await;
+    let plain = admin(reqwest::Method::POST, base, "/keys", Some(json!({"name": "plain"}))).await;
+    let trusted = admin(reqwest::Method::POST, base, "/keys", Some(json!({"name": "trusted"}))).await;
+    assert_eq!(plain["allowControl"], false);
+    let id = trusted["id"].as_str().unwrap();
+    admin(reqwest::Method::PATCH, base, &format!("/keys/{id}"), Some(json!({"allowControl": true}))).await;
+    let (plain, trusted) = (plain["key"].as_str().unwrap(), trusted["key"].as_str().unwrap());
+
+    // A key without the flag neither sees nor can call the tools.
+    let found = parsed(&call(base, "/mcp", Some(plain), "search_tools", json!({"query": "providers"})).await);
+    assert!(!tool_names(&found).iter().any(|t| t.starts_with("zilong__")), "{found}");
+    let r = run(base, Some(plain), "zilong__list_providers", json!({})).await;
+    assert_eq!(r["isError"], true, "{r}");
+    let all = rpc(base, "/mcp/all", Some(plain), "tools/list", json!({})).await;
+    assert!(!all.to_string().contains("zilong__"), "{all}");
+
+    // A key with it does, and the answers carry no credentials.
+    let found = parsed(&call(base, "/mcp", Some(trusted), "search_tools", json!({"query": "providers"})).await);
+    assert!(tool_names(&found).contains(&"zilong__list_providers".to_string()), "{found}");
+    let r = run(base, Some(trusted), "zilong__list_providers", json!({})).await;
+    assert!(r.get("isError").is_none(), "{r}");
+    let text = first_text(&r);
+    assert!(text.contains("main") && !text.contains(secret) && !text.contains("supersecret"), "{text}");
+
+    let md = "---\nname: Demo\ndescription: A demo skill\n---\nDo the demo.";
+    let saved = run(base, Some(trusted), "zilong__save_skill", json!({"skillMd": md})).await;
+    assert!(saved.get("isError").is_none(), "{saved}");
+    let list = parsed(&run(base, Some(trusted), "zilong__list_skills", json!({})).await);
+    assert_eq!(list["skills"][0]["name"], "Demo", "{list}");
+    let r = run(base, Some(trusted), "zilong__delete_skill", json!({"name": "demo"})).await;
+    assert!(r.get("isError").is_none(), "{r}");
+}

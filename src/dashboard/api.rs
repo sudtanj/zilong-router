@@ -225,7 +225,7 @@ pub async fn change_password(State(state): S, Json(b): Json<PasswordBody>) -> R 
 
 // ----- connections (helpers) ---------------------------------------------------
 
-fn locks_of(c: &ProviderConnection, now: OffsetDateTime) -> Vec<Value> {
+pub fn locks_of(c: &ProviderConnection, now: OffsetDateTime) -> Vec<Value> {
     let mut out = Vec::new();
     if let Some(o) = c.data.as_object() {
         for (k, v) in o {
@@ -466,8 +466,16 @@ pub async fn unlock_connection(State(state): S, Path(id): Path<String>) -> R {
 
 // ----- client API keys -----------------------------------------------------------
 
+/// A key as the dashboard shows it, with the "Allow zilong control" flag (see `mcp::control`).
+fn key_json(state: &AppState, k: &crate::db::ApiKey) -> Value {
+    let mut v = serde_json::to_value(k).unwrap_or(Value::Null);
+    v["allowControl"] = json!(mcp::control::key_allowed(&state.db, &k.id));
+    v
+}
+
 pub async fn keys(State(state): S) -> R {
-    Ok(Json(serde_json::to_value(state.db.api_keys()?).unwrap_or(Value::Array(vec![]))))
+    let list: Vec<Value> = state.db.api_keys()?.iter().map(|k| key_json(&state, k)).collect();
+    Ok(Json(Value::Array(list)))
 }
 
 #[derive(Deserialize, Default)]
@@ -477,7 +485,7 @@ pub struct NewKey {
 
 pub async fn create_key(State(state): S, Json(b): Json<NewKey>) -> R {
     let k = crate::auth::create_key(&state.cfg, &state.db, b.name.filter(|s| !s.trim().is_empty()))?;
-    Ok(Json(serde_json::to_value(k).unwrap_or(Value::Null)))
+    Ok(Json(key_json(&state, &k)))
 }
 
 #[derive(Deserialize, Default)]
@@ -487,23 +495,33 @@ pub struct KeyPatch {
     is_active: Option<bool>,
     access_restricted: Option<bool>,
     access_allow: Option<Vec<String>>,
+    /// "Allow zilong control": the built-in `zilong` MCP server (off by default).
+    allow_control: Option<bool>,
 }
 
 pub async fn patch_key(State(state): S, Path(id): Path<String>, Json(b): Json<KeyPatch>) -> R {
     let cur = state.db.api_keys()?.into_iter().find(|k| k.id == id || k.key == id).ok_or_else(not_found)?;
+    let cur_id = cur.id.clone();
     let access = if b.access_restricted.is_some() || b.access_allow.is_some() {
         Some((b.access_restricted.unwrap_or(cur.access_restricted), b.access_allow.unwrap_or(cur.access_allow)))
     } else {
         None
     };
     state.db.update_api_key(&id, b.name.as_deref(), b.is_active, access.as_ref().map(|(r, a)| (*r, a.as_slice())))?;
+    if let Some(on) = b.allow_control {
+        mcp::control::set_key_allowed(&state.db, &cur_id, on)?;
+    }
     let k = state.db.api_keys()?.into_iter().find(|k| k.id == id || k.key == id).ok_or_else(not_found)?;
-    Ok(Json(serde_json::to_value(k).unwrap_or(Value::Null)))
+    Ok(Json(key_json(&state, &k)))
 }
 
 pub async fn delete_key(State(state): S, Path(id): Path<String>) -> R {
+    let key_id = state.db.api_keys()?.into_iter().find(|k| k.id == id || k.key == id).map(|k| k.id);
     if !state.db.delete_api_key(&id)? {
         return Err(not_found());
+    }
+    if let Some(key_id) = key_id {
+        mcp::control::set_key_allowed(&state.db, &key_id, false)?;
     }
     Ok(Json(json!({"ok": true})))
 }
@@ -883,7 +901,7 @@ pub struct UsageQuery {
 }
 
 /// Upstream periods: today | 24h | 7d | 30d | 60d | all.
-fn period_since(period: &str) -> (Option<String>, bool) {
+pub fn period_since(period: &str) -> (Option<String>, bool) {
     let now = OffsetDateTime::now_utc();
     let fmt = |t: OffsetDateTime| t.format(&time::format_description::well_known::Rfc3339).ok();
     match period {

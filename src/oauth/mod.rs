@@ -3,7 +3,7 @@
 //! (refresh). Request-time quirks of these and the free providers live in `hooks`.
 //!
 //! Two login shapes, both driven from the dashboard:
-//! * redirect (claude, xai, cline, clinepass): the user opens `authUrl`, signs in and
+//! * redirect (claude, xai, codex, cline, clinepass): the user opens `authUrl`, signs in and
 //!   pastes the URL the browser lands on (the redirect points at localhost, which is
 //!   not this board) back into the dashboard, which calls `exchange`;
 //! * device code (github, kimi, kilocode, minimax-code, nous, muse): the user enters
@@ -12,6 +12,7 @@
 //! Tokens are stored on the connection with upstream's field names (`accessToken`,
 //! `refreshToken`, `expiresAt`, `providerSpecificData`), `authType` "oauth".
 
+pub mod codex;
 pub mod hooks;
 pub mod opencode;
 pub mod util;
@@ -37,7 +38,7 @@ pub enum Flow {
 /// Providers whose login this build implements.
 pub fn flow(provider: &str) -> Option<Flow> {
     match provider {
-        "claude" | "xai" | "cline" | "clinepass" => Some(Flow::Redirect),
+        "claude" | "xai" | "codex" | "cline" | "clinepass" => Some(Flow::Redirect),
         "github" | "kimi" | "kilocode" | "minimax-code" | "minimax-code-global" | "nous" | "muse" => Some(Flow::Device),
         _ => None,
     }
@@ -246,6 +247,26 @@ pub async fn start(state: &AppState, provider: &str, redirect_uri: Option<&str>)
                     ],
                 )?
             }
+            "codex" => {
+                let (v, c) = pkce(64);
+                sess.verifier = v;
+                sess.redirect_uri = codex::REDIRECT.into();
+                reqwest::Url::parse_with_params(
+                    codex::AUTHORIZE,
+                    &[
+                        ("response_type", "code"),
+                        ("client_id", codex::CLIENT),
+                        ("redirect_uri", codex::REDIRECT),
+                        ("scope", codex::SCOPE),
+                        ("code_challenge", c.as_str()),
+                        ("code_challenge_method", "S256"),
+                        ("id_token_add_organizations", "true"),
+                        ("codex_cli_simplified_flow", "true"),
+                        ("originator", "codex_cli_rs"),
+                        ("state", sess.state.as_str()),
+                    ],
+                )?
+            }
             _ => reqwest::Url::parse_with_params(
                 CLINE_AUTHORIZE,
                 &[
@@ -430,6 +451,38 @@ pub async fn exchange(state: &AppState, provider: &str, session: &str, pasted: &
             let mut t = Tokens::standard(&v);
             if let Some(id) = s(&v, "id_token") {
                 t.email = util::jwt_payload(&id).and_then(|p| s(&p, "email"));
+                t.psd.insert("idToken".into(), json!(id));
+            }
+            t
+        }
+        "codex" => {
+            let (status, v) = post_form(
+                state,
+                codex::TOKEN,
+                &[
+                    ("grant_type", "authorization_code"),
+                    ("client_id", codex::CLIENT),
+                    ("code", code.as_str()),
+                    ("redirect_uri", sess.redirect_uri.as_str()),
+                    ("code_verifier", sess.verifier.as_str()),
+                ],
+                &[],
+            )
+            .await?;
+            if status >= 300 {
+                bail!("Codex token exchange failed ({status}): {}", err_text(&v));
+            }
+            let mut t = Tokens::standard(&v);
+            let id = s(&v, "id_token");
+            let info = codex::account_info_for(id.as_deref(), &t.access);
+            t.email = info.email;
+            if let Some(a) = info.account_id {
+                t.psd.insert("chatgptAccountId".into(), json!(a));
+            }
+            if let Some(p) = info.plan {
+                t.psd.insert("chatgptPlanType".into(), json!(p));
+            }
+            if let Some(id) = id {
                 t.psd.insert("idToken".into(), json!(id));
             }
             t
@@ -844,6 +897,7 @@ static LOCKS: LazyLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> =
 fn refresh_lead_secs(provider: &str) -> i64 {
     match provider {
         "claude" => 4 * 3600,
+        "codex" => 600,
         "minimax-code" | "minimax-code-global" => 600,
         _ => 300,
     }
@@ -984,6 +1038,20 @@ async fn refresh(state: &AppState, c: &ProviderConnection) -> Result<Value> {
                 state,
                 XAI_TOKEN,
                 &[("grant_type", "refresh_token"), ("refresh_token", rt.as_str()), ("client_id", XAI_CLIENT)],
+                &[],
+            )
+            .await?
+        }
+        "codex" => {
+            post_form(
+                state,
+                codex::TOKEN,
+                &[
+                    ("grant_type", "refresh_token"),
+                    ("refresh_token", rt.as_str()),
+                    ("client_id", codex::CLIENT),
+                    ("scope", codex::SCOPE),
+                ],
                 &[],
             )
             .await?

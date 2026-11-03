@@ -56,11 +56,6 @@
    "reason": "needs a dedicated executor"
   },
   {
-   "id": "codex",
-   "name": "OpenAI Codex",
-   "reason": "needs a dedicated executor"
-  },
-  {
    "id": "comfyui",
    "name": "ComfyUI",
    "reason": "no LLM transport (media-only provider)"

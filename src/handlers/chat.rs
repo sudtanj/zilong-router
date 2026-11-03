@@ -21,11 +21,12 @@ use super::ApiError;
 use crate::auth::{authenticate, AuthError, Caller};
 use crate::db::ProviderConnection;
 use crate::executor::{self, ExecError};
-use crate::oauth::hooks::Restore;
+use crate::oauth::hooks::{self, Restore};
 use crate::providers::Format;
 use crate::router::{self, Pick, Verdict};
 use crate::sse;
 use crate::state::AppState;
+use crate::translator::codex::FromResponses;
 use crate::translator::{self, StreamTranslator};
 use crate::usage::{self, TokenCounts};
 
@@ -540,7 +541,7 @@ async fn json_response(ctx: ReqCtx, resp: reqwest::Response, client_stream: bool
     let text = resp.text().await.map_err(|e| ApiError::new(502, ctx.source, format!("reading upstream body: {e}")))?;
     let v: Value = if upstream_sse {
         // Upstream insisted on streaming; collapse it into one JSON document.
-        collapse_sse(&text, ctx.target, ctx.source, &ctx.model, &ctx.decloak)
+        collapse_sse(&text, ctx.target, ctx.source, &ctx.model, &ctx.decloak, hooks::is_codex(&ctx.provider))
     } else {
         let mut v: Value = serde_json::from_str(&text).map_err(|_| {
             ApiError::new(
@@ -573,16 +574,28 @@ async fn json_response(ctx: ReqCtx, resp: reqwest::Response, client_stream: bool
 }
 
 /// Replay a full SSE body through the stream translator and assemble the final JSON.
-fn collapse_sse(text: &str, from: Format, to: Format, model: &str, decloak: &Restore) -> Value {
+fn collapse_sse(text: &str, from: Format, to: Format, model: &str, decloak: &Restore, codex: bool) -> Value {
     let mut parser = sse::Parser::default();
     let mut tr = StreamTranslator::new(from, to, model);
+    let mut pre = codex.then(|| FromResponses::new(model));
     let mut events = Vec::new();
     for mut ev in parser.push(text.as_bytes()).into_iter().chain(parser.finish()) {
         crate::oauth::hooks::decloak_event(&mut ev, decloak);
-        events.extend(tr.feed(&ev));
+        for e in lift(&mut pre, ev) {
+            events.extend(tr.feed(&e));
+        }
     }
     events.extend(tr.finish());
     assemble(&events, to, model, &tr.usage)
+}
+
+/// Codex answers in Responses events; turn them into chat chunks before the usual
+/// translation to the client's format. Other providers pass through.
+fn lift(pre: &mut Option<FromResponses>, ev: sse::Event) -> Vec<sse::Event> {
+    match pre {
+        Some(c) => c.feed(&ev),
+        None => vec![ev],
+    }
 }
 
 /// Build a complete response document from translated client-format events.
@@ -780,6 +793,7 @@ fn stream_response(ctx: ReqCtx, resp: reqwest::Response) -> Response {
         let mut upstream = resp.bytes_stream();
         let mut parser = sse::Parser::default();
         let mut tr = StreamTranslator::new(ctx.target, ctx.source, &ctx.model);
+        let mut pre = hooks::is_codex(&ctx.provider).then(|| FromResponses::new(&ctx.model));
         let mut ttft: Option<u128> = None;
         let mut status = "200 OK";
         let mut client_gone = false;
@@ -797,8 +811,10 @@ fn stream_response(ctx: ReqCtx, resp: reqwest::Response) -> Response {
                 Ok(None) => {
                     if let Some(mut ev) = parser.finish() {
                         crate::oauth::hooks::decloak_event(&mut ev, &ctx.decloak);
-                        for out in tr.feed(&ev) {
-                            let _ = tx.send(Ok(out.to_bytes())).await;
+                        for e in lift(&mut pre, ev) {
+                            for out in tr.feed(&e) {
+                                let _ = tx.send(Ok(out.to_bytes())).await;
+                            }
                         }
                     }
                     for out in tr.finish() {
@@ -818,9 +834,14 @@ fn stream_response(ctx: ReqCtx, resp: reqwest::Response) -> Response {
             }
             for mut ev in parser.push(&chunk) {
                 crate::oauth::hooks::decloak_event(&mut ev, &ctx.decloak);
-                for out in tr.feed(&ev) {
-                    if tx.send(Ok(out.to_bytes())).await.is_err() {
-                        client_gone = true;
+                for e in lift(&mut pre, ev) {
+                    for out in tr.feed(&e) {
+                        if tx.send(Ok(out.to_bytes())).await.is_err() {
+                            client_gone = true;
+                            break;
+                        }
+                    }
+                    if client_gone {
                         break;
                     }
                 }

@@ -13,6 +13,7 @@
 
 pub mod auth;
 pub mod client;
+pub mod control;
 pub mod nested;
 pub mod oauth_server;
 pub mod server;

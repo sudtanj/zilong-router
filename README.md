@@ -317,6 +317,25 @@ by clients that reach the router from elsewhere.
 - Server definitions live in the `kv` table (scopes `mcpServers` and `mcpTools`), so the
   Turso mirror carries them.
 
+### The built-in `zilong` control server
+
+An agent can look at the router and manage skills through the same `/mcp` gateway: a
+built-in server `zilong` whose tools (`zilong__list_providers`, `list_models`,
+`usage_summary`, `list_mcp_servers`, `list_skills`, `get_skill`, `save_skill`,
+`set_skill_enabled`, `delete_skill`) are found with `search_tools` like any other.
+
+- **Opt-in per API key**: switch on **Allow zilong control** on a key of the API Keys page
+  (off by default; `PATCH /api/admin/keys/:id {"allowControl": true}`). A key without it
+  never sees or can call these tools; OAuth client tokens use the flag of their key, and a
+  keyless loopback caller does not get them. The flag is kept in the `kv` table (scope
+  `keyControl`), so old data directories work unchanged.
+- **No secrets**: answers are built from fixed lists of fields and scrubbed again for
+  anything that looks like a key or token. There is no tool for API keys, provider keys,
+  OAuth tokens, MCP headers or client secrets, the dashboard password or the environment,
+  and none to change connections, MCP servers or the Token Saver.
+- Skills are written through the Skills Gateway's own validation and size limits (1 MB per
+  skill, 10 MB in total). Calls are counted in the MCP usage like any server's.
+
 ## Skills Gateway
 
 One place for [Agent Skills](https://github.com/anthropics/skills): folders with a

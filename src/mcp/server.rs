@@ -33,6 +33,7 @@ use futures_util::future::join_all;
 use serde_json::{json, Value};
 
 use super::client::RpcError as UpstreamRpcError;
+use super::control;
 use super::nested::{self, Adapter, Found, VTool};
 use super::usage::{self, Call};
 use super::{params_summary, search, tool_description, tool_name, ServerConfig, SEP};
@@ -197,10 +198,13 @@ impl Ctx<'_> {
         let asked = params.get("protocolVersion").and_then(Value::as_str).unwrap_or_default();
         let version = SUPPORTED_VERSIONS.iter().find(|v| **v == asked).copied().unwrap_or(SUPPORTED_VERSIONS[0]);
         let servers = self.servers();
-        let names: Vec<String> = servers
+        let mut names: Vec<String> = servers
             .iter()
             .map(|s| if s.description.is_empty() { s.id.clone() } else { format!("{} ({})", s.id, s.description) })
             .collect();
+        if self.control_on() {
+            names.push(format!("{} ({})", control::SERVER, control::DESCRIPTION));
+        }
         let skill_note = skills::instructions(&skills::enabled(&self.state.db));
         let mut instructions = match self.mode {
             Mode::Skills => {
@@ -210,12 +214,12 @@ impl Ctx<'_> {
                 "zilong-router MCP gateway in front of {} MCP server(s): {}. Their tools are not listed directly: \
                  call search_tools with what you want to do, get_tool_schemas for the exact parameters if needed, \
                  then call_tool with the tool name (server__tool) and its arguments.",
-                servers.len(),
+                names.len(),
                 names.join(", ")
             ),
             Mode::All => format!(
                 "zilong-router MCP gateway: the tools of {} MCP server(s) ({}), named server__tool.",
-                servers.len(),
+                names.len(),
                 names.join(", ")
             ),
         };
@@ -285,7 +289,10 @@ impl Ctx<'_> {
 
     /// Every tool of every server this caller may use, named `server__tool`.
     async fn all_tools(&self) -> Vec<Value> {
-        let (catalogs, _) = self.catalogs(&self.servers()).await;
+        let (mut catalogs, _) = self.catalogs(&self.servers()).await;
+        if self.control_on() {
+            catalogs.push((control::SERVER.to_string(), control::tool_defs()));
+        }
         catalogs
             .iter()
             .flat_map(|(server, tools)| {
@@ -297,6 +304,30 @@ impl Ctx<'_> {
                 })
             })
             .collect()
+    }
+
+    /// Whether this caller may use the built-in `zilong` control server (an API key with
+    /// the flag set; see `control`). It is not offered on `/skills`.
+    fn control_on(&self) -> bool {
+        self.mode != Mode::Skills && control::allowed(&self.state.db, self.caller)
+    }
+
+    /// The control tool `name` (`zilong__tool`) stands for, when this caller may use it.
+    fn control_tool<'n>(&self, name: &'n str) -> Option<&'n str> {
+        let rest = name.strip_prefix(control::SERVER)?;
+        let tool = rest.strip_prefix(SEP).or_else(|| rest.strip_prefix('/'))?;
+        (control::TOOLS.contains(&tool) && self.control_on()).then_some(tool)
+    }
+
+    fn call_control(&self, tool: &str, args: &Value) -> Value {
+        let started = Instant::now();
+        let out = control::call(self.state, tool, args);
+        let error = super::tool_error(&out);
+        let status = if error.is_some() { usage::TOOL_ERROR } else { usage::OK };
+        let (request_bytes, response_bytes) = (usage::json_len(args), usage::json_len(&out));
+        let (kind, server) = (usage::CALL, Some(control::SERVER));
+        self.record(Call { kind, server, tool, status, error, started, request_bytes, response_bytes });
+        out
     }
 
     async fn call(&self, params: &Value) -> Result<Value, RpcError> {
@@ -311,6 +342,9 @@ impl Ctx<'_> {
             Mode::Meta => {}
             Mode::Skills => return Err(invalid(format!("unknown tool: {name}"))),
             Mode::All => {
+                if let Some(tool) = self.control_tool(name) {
+                    return Ok(self.call_control(tool, &args));
+                }
                 let unknown = || invalid(format!("unknown tool: {name}"));
                 let (server, tool) = name.split_once(SEP).ok_or_else(unknown)?;
                 let cfg = self.servers().into_iter().find(|s| s.id == server).ok_or_else(unknown)?;
@@ -607,13 +641,18 @@ impl Ctx<'_> {
         let query = args.get("query").and_then(Value::as_str).unwrap_or_default();
         let limit = args.get("limit").and_then(Value::as_u64).map_or(DEFAULT_LIMIT, |n| n as usize).clamp(1, MAX_LIMIT);
         let mut servers = self.servers();
+        let mut with_control = self.control_on();
         if let Some(only) = args.get("server").and_then(Value::as_str).filter(|s| !s.is_empty()) {
             servers.retain(|s| s.id == only);
-            if servers.is_empty() {
+            with_control = with_control && only == control::SERVER;
+            if servers.is_empty() && !with_control {
                 return text_result(format!("unknown server `{only}`; call list_servers"), true);
             }
         }
-        let (catalogs, unavailable) = self.catalogs(&servers).await;
+        let (mut catalogs, unavailable) = self.catalogs(&servers).await;
+        if with_control {
+            catalogs.push((control::SERVER.to_string(), control::tool_defs()));
+        }
         let nested: Vec<(ServerConfig, Adapter)> = catalogs
             .iter()
             .filter_map(|(id, tools)| {
@@ -774,6 +813,15 @@ impl Ctx<'_> {
     }
 
     async fn schema(&self, name: &str, servers: &[ServerConfig]) -> Result<Value, String> {
+        if let Some(tool) = self.control_tool(name) {
+            let def = control::tool_defs().into_iter().find(|t| tool_name(t) == tool).unwrap_or_default();
+            return Ok(json!({
+                "tool": format!("{}{SEP}{tool}", control::SERVER),
+                "description": tool_description(&def),
+                "inputSchema": def.get("inputSchema").cloned().unwrap_or_else(|| json!({"type": "object"})),
+                "annotations": def.get("annotations").cloned().unwrap_or(Value::Null),
+            }));
+        }
         let (cfg, tool) = self.resolve(name, servers).await?;
         let tools = self.state.mcp.tools(self.state, &cfg, false).await.map_err(|e| format!("{e:#}"))?;
         let Some(t) = tools.iter().find(|t| tool_name(t) == tool) else {
@@ -836,6 +884,9 @@ impl Ctx<'_> {
             Some(v) if v.is_object() => v.clone(),
             Some(_) => return Err(text_result("arguments must be a JSON object".into(), true)),
         };
+        if let Some(tool) = self.control_tool(name) {
+            return Ok(self.call_control(tool, &arguments));
+        }
         match self.resolve(name, &self.servers()).await {
             Ok((cfg, tool)) => Ok(self.route(&cfg, &tool, arguments).await),
             Err(e) => {
@@ -851,7 +902,7 @@ impl Ctx<'_> {
 
     async fn list_servers(&self) -> Value {
         let servers = self.servers();
-        let list: Vec<Value> = servers
+        let mut list: Vec<Value> = servers
             .iter()
             .map(|s| {
                 let cached = super::cached_tools(&self.state.db, &s.id);
@@ -863,6 +914,10 @@ impl Ctx<'_> {
                 v
             })
             .collect();
+        if self.control_on() {
+            let (name, tools) = (control::SERVER, control::TOOLS.len());
+            list.push(json!({"server": name, "name": name, "description": control::DESCRIPTION, "tools": tools}));
+        }
         json_result(json!({"servers": list}))
     }
 }

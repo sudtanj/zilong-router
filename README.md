@@ -25,7 +25,7 @@ Orange Pi Zero 3:
   cooldown locks and exponential backoff on rate limits, automatic fallback to the next
   account, and retries on 502/503/504 (the same rules as upstream). The `auto` model
   falls back (or rotates) across every connected provider.
-- OAuth sign-in and free providers (Claude, GitHub Copilot, xAI, Kimi, Cline, OpenCode
+- OAuth sign-in and free providers (Claude, OpenAI Codex, GitHub Copilot, xAI, Kimi, Cline, OpenCode
   and more), plus the RTK / Caveman token saver.
 - An MCP gateway (`/mcp`): one MCP endpoint in front of all your MCP servers, with
   Composio-style meta tools (search, schema, call) so the agent's context holds four tool
@@ -141,9 +141,10 @@ refreshed automatically before they expire (and once more after a 401).
 |---|---|
 | Claude Code (`claude`) | Open the sign-in page, log in, then paste the address you land on (`http://localhost:…/callback?code=…`) back into the dashboard. The page itself may not load, that's expected. |
 | xAI (`xai`), Cline, Cline Pass | Same: paste the callback address. xAI always lands on `http://127.0.0.1:56121/callback`. |
+| OpenAI Codex (`codex`, `cx`) | ChatGPT Plus/Pro/Team sign-in as the Codex CLI does it: paste the callback address (`http://localhost:1455/auth/callback?code=…`). The account id is read from the id token and sent with every request. |
 | GitHub Copilot, Kimi, Kilo Code, MiniMax Code (CN / global), Nous, Muse | Device code: the dashboard shows a code, you enter it on the provider's page, the dashboard notices when you approve. |
 
-Claude Code and GitHub Copilot carry upstream's risk notice: they use a subscription session
+Claude Code, OpenAI Codex and GitHub Copilot carry upstream's risk notice: they use a subscription session
 that is not licensed for proxy use, so the account may be restricted or banned. The
 dashboard shows that warning on their pages.
 
@@ -152,6 +153,14 @@ prompt, billing header, `metadata.user_id`) and rename tools so they don't clash
 Claude Code's own, restoring the names in the reply. GitHub accounts trade the GitHub token
 for a Copilot token and send Claude models to Copilot's `/v1/messages`. Kimi, Cline,
 MiniMax, Muse and Kilo get their client headers.
+
+Codex accounts talk to `chatgpt.com/backend-api/codex/responses` (OpenAI Responses API, always
+streamed, `store: false`). The router turns chat and Anthropic requests into Responses
+requests (system prompt as `instructions`, Codex's stock prompt when there is none, effort
+from `reasoning_effort` or a model suffix such as `-high`) and the event stream back into
+chat chunks, so Claude Code, Cursor and the `auto` models can use it too. Not carried over:
+hosted tools (web search), remote image URLs are passed as URLs instead of inlined, and an
+overload error inside an already-started stream is not retried on another account.
 
 Free providers need no account: **MiMo Free** (`mimo-free`, `mmf`) fetches a free-tier
 token by itself. **OpenCode Free** (`opencode`, `oc`) sends requests the way the OpenCode
@@ -167,7 +176,7 @@ Spark models (OpenAI Responses API) and Jev (OpenCode's own `systemone` protocol
 endpoint (`http://<host>:11434/v1`).
 
 Not ported, because they need a proprietary protocol or impersonate an IDE (see
-`data/skipped.json`): Cursor, Windsurf, Kiro, Qoder, Trae, Zed, Codex (Responses API),
+`data/skipped.json`): Cursor, Windsurf, Kiro, Qoder, Trae, Zed,
 Gemini CLI / Antigravity (Gemini format), Devin CLI, OpenCode Zen / Go, iFlow, CodeBuddy,
 Kimchi, GitLab Duo.
 
@@ -607,7 +616,7 @@ Planned, roughly in order of interest. Nothing here is implemented yet.
 - Gemini wire format (`/v1beta/models/...:generateContent`).
 - Model combos (one name that falls back through a list of provider/model pairs).
 - Embeddings, image and audio endpoints.
-- Providers that need IDE-impersonation executors (Cursor, Windsurf, Kiro, Codex,
+- Providers that need IDE-impersonation executors (Cursor, Windsurf, Kiro,
   Gemini CLI …).
 
 ## Support the project

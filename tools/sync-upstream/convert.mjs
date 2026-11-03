@@ -47,7 +47,7 @@ try {
   // Upstream-special providers zilong-router implements natively (src/oauth): their
   // sign-in, token refresh and request quirks are ported, so keep them.
   const RISK_NOTICE = "⚠️ Risk Notice: This provider uses a subscription/OAuth session not officially licensed for proxy/router use. Account may be restricted or banned. Use at your own risk.";
-  const NATIVE = new Set(["claude", "cline", "clinepass", "github", "kilocode", "kimi", "mimo-free", "minimax-code", "minimax-code-global", "muse", "nous", "opencode", "xai"]);
+  const NATIVE = new Set(["claude", "cline", "clinepass", "codex", "github", "kilocode", "kimi", "mimo-free", "minimax-code", "minimax-code-global", "muse", "nous", "opencode", "xai"]);
   const SUPPORTED_FORMATS = new Set(["openai", "claude"]);
   const skipped = [];
   const skip = (e, reason) => skipped.push({ id: e.id, name: e.display?.name || e.id, reason });
@@ -57,7 +57,7 @@ try {
   for (const e of REGISTRY) {
     if (!e.transport) { skip(e, "no LLM transport (media-only provider)"); continue; }
     if (!NATIVE.has(e.id) && (SPECIAL_EXECUTORS.has(e.id) || e.transport.executor)) { skip(e, "needs a dedicated executor"); continue; }
-    if (!SUPPORTED_FORMATS.has(e.transport.format || "openai")) { skip(e, `wire format \"${e.transport.format}\" not implemented`); continue; }
+    if (!NATIVE.has(e.id) && !SUPPORTED_FORMATS.has(e.transport.format || "openai")) { skip(e, `wire format \"${e.transport.format}\" not implemented`); continue; }
     if (!NATIVE.has(e.id) && !acceptsApiKey(e)) { skip(e, "OAuth-only login flow"); continue; }
     // Upstream still offers its natively-ported providers with a risk banner.
     if (e.display?.deprecated && !NATIVE.has(e.id)) { skip(e, "marked deprecated upstream"); continue; }

@@ -12,7 +12,7 @@ use axum::http::HeaderMap;
 use parking_lot::Mutex;
 use serde_json::{json, Value};
 
-use super::{opencode, util};
+use super::{codex, opencode, util};
 use crate::db::ProviderConnection;
 use crate::providers::{Format, Provider, Transport};
 use crate::sse::Event;
@@ -71,6 +71,9 @@ pub fn patch_registry(providers: &mut [Provider]) {
                 claude.format = Format::Claude;
                 p.transports = Some(vec![Transport { format: Format::Openai, ..t }, claude]);
             }
+        }
+        if p.id == codex::ID {
+            codex::patch(p);
         }
         if p.id == opencode::ID {
             opencode::patch(p);
@@ -147,6 +150,7 @@ pub fn headers(
 ) {
     match provider.id.as_str() {
         opencode::ID => opencode::headers(client, model, h),
+        codex::ID => codex_headers(conn, model, body, h),
         "kimi" => {
             for (k, v) in util::kimi_headers(psd_str(conn, "deviceId")) {
                 set(h, k, v);
@@ -211,6 +215,46 @@ pub fn headers(
         }
         _ => {}
     }
+}
+
+pub fn is_codex(provider: &str) -> bool {
+    provider == codex::ID
+}
+
+/// Codex wants the ChatGPT account on every call, the Codex CLI's identity headers and
+/// a session id (the prompt-cache key chosen when the body was built).
+fn codex_headers(conn: &ProviderConnection, model: &str, body: &Value, h: &mut HashMap<String, String>) {
+    let account = psd_str(conn, "workspaceId")
+        .or_else(|| psd_str(conn, "chatgptAccountId"))
+        .or_else(|| psd_str(conn, "accountId"))
+        .map(str::to_string)
+        .or_else(|| conn.secret().and_then(|t| codex::account_info(t).account_id));
+    if let Some(a) = account {
+        set(h, "ChatGPT-Account-ID", a);
+    }
+    set(h, "OpenAI-Beta", "responses=experimental");
+    if !has(h, "originator") {
+        set(h, "originator", "codex_cli_rs");
+    }
+    let session = body.get("prompt_cache_key").and_then(Value::as_str).unwrap_or(conn.id.as_str());
+    set(h, "session_id", session);
+    if crate::translator::codex::is_lite(model) {
+        set(h, "x-openai-internal-codex-responses-lite", "true");
+    }
+}
+
+/// Stable per account and conversation (hash of the first user message), so Codex's
+/// prompt cache keeps hitting across the turns of one chat.
+fn codex_session(conn: &ProviderConnection, body: &Value) -> String {
+    let first = body
+        .get("messages")
+        .and_then(Value::as_array)
+        .and_then(|ms| ms.iter().find(|m| m.get("role").and_then(Value::as_str) == Some("user")))
+        .and_then(|m| m.get("content"))
+        .map(crate::translator::text_of)
+        .unwrap_or_default();
+    let h = util::sha256_hex(format!("{}|{first}", conn.id).as_bytes());
+    format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32])
 }
 
 /// Cline OAuth tokens are WorkOS JWTs sent as `workos:<jwt>`; API keys go verbatim.
@@ -282,6 +326,10 @@ pub fn body(
             let mut b = body.clone();
             mimo_marker(&mut b);
             Some((b, Restore::None))
+        }
+        codex::ID if target == Format::Openai => {
+            let session = codex_session(conn, body);
+            Some((crate::translator::codex::chat_to_responses(body, model, &session), Restore::None))
         }
         opencode::ID => {
             let mut b = body.clone();

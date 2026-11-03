@@ -389,6 +389,10 @@ function keyRow(k) {
       <p class="xs muted mt1">Created ${new Date(k.createdAt).toLocaleDateString()}</p>
       ${k.isActive ? '' : '<p class="xs mt1" style="color:#f97316">Paused</p>'}
       <div class="mt2">
+        <div class="row gap3">${toggle(k.allowControl, `data-act="controlKey" data-id="${k.id}"`, 'sm')}<span class="sm medium">Allow zilong control</span></div>
+        <p class="xs muted mt1">Lets this key read the router's status (providers, models, usage, MCP servers) and manage skills through the <code>zilong</code> MCP server. It never exposes keys or tokens.</p>
+      </div>
+      <div class="mt2">
         <div class="row gap3">${toggle(k.accessRestricted, `data-act="restrictKey" data-id="${k.id}"`, 'sm')}<span class="sm medium">Restrict access</span></div>
         ${k.accessRestricted ? `<div class="row wrap mt2" style="gap:6px">
           ${k.accessAllow.length === 0 ? '<span class="xs" style="color:#f97316">No models allowed — this key can call nothing.</span>' : ''}
@@ -509,6 +513,11 @@ actions.restrictKey = async ({id}, b) => {
   const k = keyCache.find((x) => x.id === id); const next = !k.accessRestricted;
   if (next && !(await confirmModal({title: 'Restrict API Key', message: `Restrict API key "${k.name || ''}"?\n\nIt will only be able to call the models you add. Until you add one, it can call nothing.`, confirmText: 'Restrict', variant: 'primary'}))) return;
   await patch('/keys/' + id, {accessRestricted: next}); reload();
+};
+actions.controlKey = async ({id}) => {
+  const k = keyCache.find((x) => x.id === id); const next = !k.allowControl;
+  if (next && !(await confirmModal({title: 'Allow zilong control', message: `Let API key "${k.name || ''}" use the built-in zilong MCP server?\n\nIt can read provider, model, usage and MCP server status (never keys or tokens) and add, change, switch and delete skills.`, confirmText: 'Allow', variant: 'primary'}))) return;
+  await patch('/keys/' + id, {allowControl: next}); reload();
 };
 actions.keyAllowRemove = async ({id, model}) => {
   const k = keyCache.find((x) => x.id === id);

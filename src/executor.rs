@@ -203,6 +203,9 @@ pub async fn send(
     client_headers: &HeaderMap,
     stream: bool,
 ) -> Result<reqwest::Response, ExecError> {
+    if provider.id == crate::oauth::deepseek_web::ID {
+        return crate::oauth::deepseek_web::send(state, conn, model, body).await;
+    }
     let url = build_url(provider, transport, conn, model, stream);
     let headers = build_headers(state, provider, transport, conn, client_headers, model, body, stream);
     let mut hm = reqwest::header::HeaderMap::new();

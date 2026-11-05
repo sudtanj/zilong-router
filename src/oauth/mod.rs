@@ -13,6 +13,8 @@
 //! `refreshToken`, `expiresAt`, `providerSpecificData`), `authType` "oauth".
 
 pub mod codex;
+pub mod deepseek_pow;
+pub mod deepseek_web;
 pub mod freebuff;
 pub mod hooks;
 pub mod opencode;

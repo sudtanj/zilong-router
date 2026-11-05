@@ -478,6 +478,9 @@ async fn attempt(
                     }
                     Verdict::Fallback { .. } => {
                         router::mark_unavailable(&state, &conn, &resolved.model, status, &msg, verdict);
+                        if status == 401 && provider.id == crate::oauth::deepseek_web::ID {
+                            crate::oauth::deepseek_web::mark_expired(&state, &conn, &msg);
+                        }
                         exclude.insert(conn.id.clone());
                         last_err = Some((status, msg));
                         if matches!(e, ExecError::Network(_)) && tried >= 3 {

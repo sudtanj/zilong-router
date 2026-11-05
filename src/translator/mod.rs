@@ -5,6 +5,7 @@
 //! results survives as a text marker).
 
 pub mod codex;
+pub mod deepseek_web;
 pub mod request;
 pub mod response;
 pub mod responses;

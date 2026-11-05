@@ -47,7 +47,10 @@ try {
   // Upstream-special providers zilong-router implements natively (src/oauth): their
   // sign-in, token refresh and request quirks are ported, so keep them.
   const RISK_NOTICE = "⚠️ Risk Notice: This provider uses a subscription/OAuth session not officially licensed for proxy/router use. Account may be restricted or banned. Use at your own risk.";
-  const NATIVE = new Set(["claude", "cline", "clinepass", "codex", "freebuff", "github", "kilocode", "kimi", "mimo-free", "minimax-code", "minimax-code-global", "muse", "nous", "opencode", "xai"]);
+  // Web-chat accounts used through their site API: upstream ships no risk notice for them.
+  const WEB_RISK_NOTICE = "⚠️ Risk Notice: This provider drives the free chat.deepseek.com web account, which DeepSeek's terms do not license for proxy/router use. Account may be restricted or banned. Use at your own risk.";
+  const WEB_RISKY = new Set(["deepseek-web"]);
+  const NATIVE = new Set(["claude", "cline", "clinepass", "codex", "deepseek-web", "freebuff", "github", "kilocode", "kimi", "mimo-free", "minimax-code", "minimax-code-global", "muse", "nous", "opencode", "xai"]);
   const SUPPORTED_FORMATS = new Set(["openai", "claude"]);
   const skipped = [];
   const skip = (e, reason) => skipped.push({ id: e.id, name: e.display?.name || e.id, reason });
@@ -82,7 +85,7 @@ try {
       authModes: e.authModes || null,
       noAuth: !!e.noAuth,
       priority: e.priority ?? 999,
-      display: e.display ? { name: e.display.name, color: e.display.color, textIcon: e.display.textIcon, icon: e.display.icon, website: e.display.website, apiKeyUrl: e.display.notice?.apiKeyUrl || e.display.notice?.signupUrl || null, deprecated: !!e.display.deprecated, deprecationNotice: e.display.deprecationNotice === "RISK_NOTICE" ? RISK_NOTICE : e.display.deprecationNotice || null } : null,
+      display: e.display ? { name: e.display.name, color: e.display.color, textIcon: e.display.textIcon, icon: e.display.icon, website: e.display.website, apiKeyUrl: e.display.notice?.apiKeyUrl || e.display.notice?.signupUrl || null, authHint: e.authHint || null, deprecated: !!e.display.deprecated || WEB_RISKY.has(e.id), deprecationNotice: WEB_RISKY.has(e.id) ? WEB_RISK_NOTICE : e.display.deprecationNotice === "RISK_NOTICE" ? RISK_NOTICE : e.display.deprecationNotice || null } : null,
       transport,
       transports: e.transports || null,
       oauth: e.oauth || null,

@@ -1347,7 +1347,7 @@ actions.addConn = ({provider, node}) => {
   const custom = isCustomId(provider), m = CUSTOM_META[provider];
   openModal({
     title: `Add ${custom ? m.name : (provCache || []).find((p) => p.id === provider)?.name || provider} API Key`,
-    body: field('name', 'Name', {placeholder: 'Production Key'}) + field('apiKey', 'API Key', {type: 'password', placeholder: 'sk-...', required: true})
+    body: field('name', 'Name', {placeholder: 'Production Key'}) + field('apiKey', 'API Key', {type: 'password', placeholder: 'sk-...', required: true, hint: esc((provCache || []).find((p) => p.id === provider)?.authHint || '')})
       + (custom ? field('baseUrl', 'Base URL', {value: m.defaultUrl, required: true, hint: m.hint}) + field('prefix', 'Prefix', {placeholder: m.prefixPh, required: true}) : '')
       + twoButtons('Add'),
     onSubmit: async (f) => {

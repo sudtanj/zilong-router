@@ -101,6 +101,8 @@ pub struct Display {
     pub icon: Option<String>,
     pub website: Option<String>,
     pub api_key_url: Option<String>,
+    /// Where to find the credential, for providers that take a pasted token instead of a key.
+    pub auth_hint: Option<String>,
     #[serde(default)]
     pub deprecated: bool,
     /// Upstream's warning for subscription sign-ins (account ban risk).

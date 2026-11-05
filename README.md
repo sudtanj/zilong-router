@@ -142,9 +142,10 @@ refreshed automatically before they expire (and once more after a 401).
 | Claude Code (`claude`) | Open the sign-in page, log in, then paste the address you land on (`http://localhost:…/callback?code=…`) back into the dashboard. The page itself may not load, that's expected. |
 | xAI (`xai`), Cline, Cline Pass | Same: paste the callback address. xAI always lands on `http://127.0.0.1:56121/callback`. |
 | OpenAI Codex (`codex`, `cx`) | ChatGPT Plus/Pro/Team sign-in as the Codex CLI does it: paste the callback address (`http://localhost:1455/auth/callback?code=…`). The account id is read from the id token and sent with every request. |
+| Freebuff (`freebuff`, `fb`) | The dashboard shows a link instead of a code: open it, sign in on freebuff.com, and the dashboard notices (it polls like the Freebuff CLI does). |
 | GitHub Copilot, Kimi, Kilo Code, MiniMax Code (CN / global), Nous, Muse | Device code: the dashboard shows a code, you enter it on the provider's page, the dashboard notices when you approve. |
 
-Claude Code, OpenAI Codex and GitHub Copilot carry upstream's risk notice: they use a subscription session
+Claude Code, OpenAI Codex, GitHub Copilot and Freebuff carry a risk notice: they use a subscription or free-tier session
 that is not licensed for proxy use, so the account may be restricted or banned. The
 dashboard shows that warning on their pages.
 
@@ -161,6 +162,17 @@ from `reasoning_effort` or a model suffix such as `-high`) and the event stream 
 chat chunks, so Claude Code, Cursor and the `auto` models can use it too. Not carried over:
 hosted tools (web search), remote image URLs are passed as URLs instead of inlined, and an
 overload error inside an already-started stream is not retried on another account.
+
+Freebuff accounts talk to `www.codebuff.com` the way the Freebuff CLI does: the server's
+model catalogue (its signed, rotating model handles; models are matched by name, e.g.
+`glm-5.3-flash`), an hour-long session bound to one model with a 45 s heartbeat that runs
+only while requests keep coming (it stops after 10 idle minutes), an agent run per burst
+of requests, the Freebuff CLI's SDK user agent, and requests signed with a per-account
+Ed25519 device key. The required Buffy system prompt opening goes first and your own
+system prompt follows. Switching models on one account ends its session and starts
+another, which counts against Freebuff's daily session limit. Approximated: the CLI's
+terminal descriptor header and its full Buffy prompt are not reproduced, and the model
+list is fixed (GLM 5.3 Flash, DeepSeek V4.1 Flash, MiMo V2.6 Flash), not read from the catalogue.
 
 Free providers need no account: **MiMo Free** (`mimo-free`, `mmf`) fetches a free-tier
 token by itself. **OpenCode Free** (`opencode`, `oc`) sends requests the way the OpenCode

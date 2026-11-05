@@ -39,8 +39,9 @@ Orange Pi Zero 3:
 - Usage and cost per request in SQLite, priced from upstream's pricing table, with
   optional offsite storage in Turso.
 - Provider definitions are **copied from upstream automatically**: a weekly GitHub
-  Actions job clones 9router and converts its registry to `data/providers.json`. No
-  hand-maintained provider list.
+  Actions job clones 9router and converts its registry to `data/providers.json`. The
+  only hand-maintained list is `data/extra-providers.json`: OpenAI-compatible providers
+  9router lacks (see [Extra providers](#extra-providers)). Upstream wins if it adds one.
 - <!-- bench:summary -->Small: a 7.3 MiB binary that is ready 13 ms after start and idles at 8.4 MiB RSS; 100 concurrent streaming requests with 32 KiB prompts peak at 36.3 MiB (1 worker thread(s); see [Benchmark](#benchmark)).<!-- /bench:summary -->
 
 Not (yet) included: Gemini wire format, model combos, embeddings,
@@ -191,6 +192,44 @@ Not ported, because they need a proprietary protocol or impersonate an IDE (see
 `data/skipped.json`): Cursor, Windsurf, Kiro, Qoder, Trae, Zed,
 Gemini CLI / Antigravity (Gemini format), Devin CLI, OpenCode Zen / Go, iFlow, CodeBuddy,
 Kimchi, GitLab Duo.
+
+### Extra providers
+
+Free (or free-trial) providers that 9router doesn't ship, kept in `data/extra-providers.json`.
+They are plain OpenAI chat completions; model lists come live from `<api>/models`. Free terms
+change often: the limits below were checked in November 2026, see each provider's page.
+
+| Id | Free terms | Key |
+| --- | --- | --- |
+| `gemini` (Google AI Studio, via its OpenAI-compatible endpoint) | Free tier on Flash / Flash-Lite / Gemma models, no card; per-project limits shown in AI Studio; prompts may train Google models | yes |
+| `codestral` | Mistral's free Codestral key, phone verification, non-commercial | yes |
+| `zai` | GLM-4.7-Flash, GLM-4.5-Flash and GLM-4.6V-Flash cost $0 | yes |
+| `zenmux` | A few `-free` models (GLM Flash and others, rotating); the Free plan itself has no API | yes |
+| `orcarouter` | Rotating `-free` models (DeepSeek V4, Qwen3.8), $0, rate limited | yes |
+| `nararoute` | Daily free token pool (reported 5-7M tokens/day, 10 req/min) on `:free` models | yes |
+| `xkiro` | Free models (DeepSeek and others) within a daily allowance, no card | yes |
+| `opper` | Free models work without a card; premium models need credit | yes |
+| `experiential` | Free plan: 10 req/min, 1M tokens/day on a small core-model pool | yes |
+| `requesty` | 13 free models, 200 requests/day and 20/min per organisation, no card | yes |
+| `aihubmix` | `*-free` models; 10 trial calls, then 100 requests/day after a $1 top-up | yes |
+| `routeway` | `:free` models, 20 req/min and 200 req/day | yes |
+| `gonka` (Gonka Broker) | About 1M tokens/month on a few models, phone verification | yes |
+| `hetzner` | Experimental API, free while it lasts: 10 req/min, 4M input tokens per key | yes |
+| `freeinference` | Harvard MadSys Lab, free open models; **logs all prompts and responses** | yes |
+| `ovhcloud` | Anonymous, **no key**: 2 req/min per IP per model | no |
+| `scaleway` | One-off 1M free tokens (card and KYC for rate limits) | yes |
+| `lightning` | Signup credits (about 30-40M tokens, 15 req/min) | yes |
+| `wandb` (W&B Inference on CoreWeave) | Limited-time free credits on Free / Academic plans | yes |
+
+Checked and left out: Hugging Face (free accounts have no credits, PRO gets $2), Ollama Cloud
+(the pay-as-you-go plan replaced the free one), DeepInfra, Moonshot, Novita, Wafer, Atlas Cloud
+and Cheaper Inference (paid, no verifiable free tier), ModelScope (needs Alibaba real-name
+verification), Aion Labs and Pollinations (free terms or keyless access not confirmed).
+
+Gemini 3 refuses replayed tool calls without a thought signature, so tool calls that have
+none (e.g. translated from a Claude client) get Google's `skip_thought_signature_validator`.
+Azure OpenAI, Bedrock (Mantle) and local LM Studio / llama.cpp / Ollama need a
+per-account URL: add them as OpenAI-compatible endpoints.
 
 ## Token Saver
 

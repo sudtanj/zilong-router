@@ -106,11 +106,6 @@
    "reason": "no LLM transport (media-only provider)"
   },
   {
-   "id": "gemini",
-   "name": "Gemini",
-   "reason": "wire format \"gemini\" not implemented"
-  },
-  {
    "id": "gemini-cli",
    "name": "Gemini CLI",
    "reason": "needs a dedicated executor"

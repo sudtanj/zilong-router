@@ -1951,8 +1951,9 @@
     "icon": "auto_awesome",
     "website": "https://chat.deepseek.com",
     "apiKeyUrl": null,
-    "deprecated": false,
-    "deprecationNotice": null
+    "authHint": "Paste your userToken from chat.deepseek.com localStorage (DevTools → Application → Local Storage)",
+    "deprecated": true,
+    "deprecationNotice": "⚠️ Risk Notice: This provider drives the free chat.deepseek.com web account, which DeepSeek's terms do not license for proxy/router use. Account may be restricted or banned. Use at your own risk."
    },
    "transport": {
     "baseUrl": "https://chat.deepseek.com/api/v0/chat/completion",

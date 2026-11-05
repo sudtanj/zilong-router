@@ -23,6 +23,15 @@ pub fn b64url(data: &[u8]) -> String {
     out
 }
 
+/// Padded standard base64.
+pub fn b64_std(data: &[u8]) -> String {
+    let mut s = b64url(data).replace('-', "+").replace('_', "/");
+    while s.len() % 4 != 0 {
+        s.push('=');
+    }
+    s
+}
+
 /// Decode standard or url-safe base64, padded or not. Invalid characters end the input.
 pub fn b64_decode(s: &str) -> Vec<u8> {
     let mut out = Vec::with_capacity(s.len() * 3 / 4);

@@ -12,7 +12,7 @@ use axum::http::HeaderMap;
 use parking_lot::Mutex;
 use serde_json::{json, Value};
 
-use super::{codex, freebuff, opencode, util};
+use super::{codex, deepseek_web, freebuff, opencode, util};
 use crate::db::ProviderConnection;
 use crate::providers::{Format, Provider, Transport};
 use crate::sse::Event;
@@ -74,6 +74,9 @@ pub fn patch_registry(providers: &mut [Provider]) {
         }
         if p.id == codex::ID {
             codex::patch(p);
+        }
+        if p.id == deepseek_web::ID {
+            deepseek_web::patch(p);
         }
         if p.id == opencode::ID {
             opencode::patch(p);

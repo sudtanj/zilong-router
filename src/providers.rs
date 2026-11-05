@@ -3,12 +3,15 @@
 //! A newer `providers.json` dropped into the data directory overrides the embedded copy
 //! at startup, so provider updates don't require a rebuild.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub const EMBEDDED_PROVIDERS: &str = include_str!("../data/providers.json");
+/// Providers 9router does not ship (or ships only in a wire format we lack), kept by
+/// hand in `data/extra-providers.json`; the upstream sync never touches this file.
+pub const EXTRA_PROVIDERS: &str = include_str!("../data/extra-providers.json");
 
 /// Wire format spoken by an upstream endpoint (or by a client).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -235,6 +238,8 @@ impl Registry {
         }
         let file: File = serde_json::from_str(&text)?;
         let mut providers = file.providers;
+        let extras: File = serde_json::from_str(EXTRA_PROVIDERS)?;
+        merge_extras(&mut providers, extras.providers);
         crate::oauth::hooks::patch_registry(&mut providers);
         providers.push(synthetic(OPENAI_COMPATIBLE, "OpenAI Compatible", Format::Openai));
         providers.push(synthetic(ANTHROPIC_COMPATIBLE, "Anthropic Compatible", Format::Claude));
@@ -268,6 +273,25 @@ impl Registry {
     }
 }
 
+/// Append the hand-maintained extras. Upstream wins: an extra whose id or alias is
+/// already taken is dropped, and so are its aliases that clash with upstream names.
+fn merge_extras(providers: &mut Vec<Provider>, extras: Vec<Provider>) {
+    let mut taken: HashSet<String> = providers.iter().flat_map(names).collect();
+    for mut p in extras {
+        if taken.contains(&p.id) || (!p.alias.is_empty() && taken.contains(&p.alias)) {
+            continue;
+        }
+        p.aliases.retain(|a| !taken.contains(a));
+        taken.extend(names(&p));
+        providers.push(p);
+    }
+}
+
+/// Id, alias and extra aliases of a provider.
+fn names(p: &Provider) -> impl Iterator<Item = String> + '_ {
+    [&p.id, &p.alias].into_iter().chain(&p.aliases).cloned()
+}
+
 fn synthetic(id: &str, name: &str, format: Format) -> Provider {
     Provider {
         id: id.to_string(),
@@ -297,6 +321,7 @@ fn synthetic(id: &str, name: &str, format: Format) -> Provider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn embedded_registry_parses() {
@@ -307,5 +332,35 @@ mod tests {
         assert_eq!(ds.transport_for(Format::Claude, "deepseek-chat").unwrap().format, Format::Claude);
         assert_eq!(ds.upstream_model_id("deepseek-v4-pro-max"), "deepseek-v4-pro");
         assert!(r.get(OPENAI_COMPATIBLE).unwrap().passthrough_models);
+    }
+
+    #[test]
+    fn extra_providers_are_merged() {
+        let r = Registry::load(None).unwrap();
+        let gemini = r.get("gemini").unwrap();
+        assert_eq!(gemini.category, "freeTier");
+        assert!(gemini.accepts_api_key());
+        assert!(gemini.is_valid_model("gemini-2.5-flash"));
+        let t = gemini.transport_for(Format::Claude, "gemini-2.5-flash").unwrap();
+        assert_eq!(t.format, Format::Openai);
+        assert!(t.base_url.ends_with("/v1beta/openai/chat/completions"));
+        assert_eq!(r.resolve_alias("scw"), Some("scaleway"));
+        let ovh = r.get("ovhcloud").unwrap();
+        assert!(ovh.no_auth && ovh.model("gpt-oss-120b").is_some());
+    }
+
+    #[test]
+    fn upstream_wins_over_extras() {
+        let upstream = json!({"providers": [
+            {"id": "zenmux", "alias": "zm-up", "display": {"name": "ZenMux upstream"}},
+            {"id": "x", "alias": "xkiro"},
+        ]});
+        let mut providers = serde_json::from_value::<File>(upstream).unwrap().providers;
+        let extras: File = serde_json::from_str(EXTRA_PROVIDERS).unwrap();
+        merge_extras(&mut providers, extras.providers);
+        assert_eq!(providers.iter().filter(|p| p.id == "zenmux").count(), 1);
+        assert_eq!(providers[0].name(), "ZenMux upstream");
+        // The extra xKiro entry's alias is taken upstream, so it is left out.
+        assert!(!providers.iter().any(|p| p.id == "xkiro"));
     }
 }

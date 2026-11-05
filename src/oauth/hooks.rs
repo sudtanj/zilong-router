@@ -1,8 +1,8 @@
 //! Request-time quirks of the OAuth and free providers: extra headers (upstream
 //! `executors/default.js` HEADER_HOOKS), GitHub Copilot routing and body fixes
 //! (`executors/github.js`), the MiMo free-tier JWT (`executors/mimo-free.js`) and
-//! Claude Code identity for Claude OAuth tokens (`utils/claudeCloaking.js`). OpenCode
-//! Free lives in `opencode.rs`.
+//! Claude Code identity for Claude OAuth tokens (`utils/claudeCloaking.js`), and
+//! Gemini thought signatures. OpenCode Free lives in `opencode.rs`.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
@@ -338,7 +338,53 @@ pub fn body(
             let renamed = opencode::body(&mut b, target);
             Some((b, if renamed.is_empty() { Restore::None } else { Restore::Names(renamed) }))
         }
+        "gemini" if target == Format::Openai && gemini_needs_signatures(body) => {
+            let mut b = body.clone();
+            gemini_signatures(&mut b);
+            Some((b, Restore::None))
+        }
         _ => None,
+    }
+}
+
+/// Gemini 3 rejects replayed tool calls without a thought signature. Clients that
+/// came through a translator (or another model) have none, so mark them with the
+/// placeholder Google documents for exactly that case; real signatures are kept.
+const GEMINI_SKIP_SIGNATURE: &str = "skip_thought_signature_validator";
+
+fn gemini_tool_calls(body: &Value) -> impl Iterator<Item = &Value> {
+    body.get("messages")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|m| m.get("role").and_then(Value::as_str) == Some("assistant"))
+        .filter_map(|m| m.get("tool_calls").and_then(Value::as_array))
+        .flatten()
+}
+
+fn has_gemini_signature(call: &Value) -> bool {
+    call.pointer("/extra_content/google/thought_signature").and_then(Value::as_str).is_some_and(|s| !s.is_empty())
+}
+
+fn gemini_needs_signatures(body: &Value) -> bool {
+    gemini_tool_calls(body).any(|c| !has_gemini_signature(c))
+}
+
+fn gemini_signatures(body: &mut Value) {
+    let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) else { return };
+    for m in messages.iter_mut().filter(|m| m.get("role").and_then(Value::as_str) == Some("assistant")) {
+        let Some(calls) = m.get_mut("tool_calls").and_then(Value::as_array_mut) else { continue };
+        for call in calls.iter_mut().filter(|c| c.is_object() && !has_gemini_signature(c)) {
+            let extra = call.as_object_mut().unwrap().entry("extra_content").or_insert_with(|| json!({}));
+            if !extra.is_object() {
+                *extra = json!({});
+            }
+            let google = extra.as_object_mut().unwrap().entry("google").or_insert_with(|| json!({}));
+            if !google.is_object() {
+                *google = json!({});
+            }
+            google["thought_signature"] = json!(GEMINI_SKIP_SIGNATURE);
+        }
     }
 }
 
@@ -676,5 +722,27 @@ mod tests {
         let mut env = json!({"success": true, "data": {"choices": []}});
         fix_response("clinepass", &mut env);
         assert!(env.get("choices").is_some());
+    }
+
+    #[test]
+    fn gemini_tool_calls_get_a_thought_signature() {
+        let c = conn("gemini", json!({"apiKey": "k"}));
+        let body = json!({"messages": [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "tool_calls": [
+                {"id": "a", "type": "function", "function": {"name": "f", "arguments": "{}"}},
+                {"id": "b", "type": "function", "function": {"name": "g", "arguments": "{}"},
+                 "extra_content": {"google": {"thought_signature": "real"}}},
+            ]},
+            {"role": "tool", "tool_call_id": "a", "content": "r"},
+        ]});
+        let (b, restore) = super::body("gemini", &c, Format::Openai, "gemini-3-flash", &body).unwrap();
+        assert_eq!(restore, Restore::None);
+        let calls = &b["messages"][1]["tool_calls"];
+        assert_eq!(calls[0]["extra_content"]["google"]["thought_signature"], GEMINI_SKIP_SIGNATURE);
+        assert_eq!(calls[1]["extra_content"]["google"]["thought_signature"], "real");
+        // Nothing to fix: the body is sent untouched.
+        assert!(super::body("gemini", &c, Format::Openai, "m", &b).is_none());
+        assert!(super::body("gemini", &c, Format::Openai, "m", &json!({"messages": []})).is_none());
     }
 }

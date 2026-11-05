@@ -103,7 +103,15 @@ try {
   mkdirSync(outDir, { recursive: true });
   const meta = { upstreamVersion, upstreamCommit, generatedAt: new Date().toISOString().slice(0, 10) };
   writeFileSync(join(outDir, "providers.json"), JSON.stringify({ meta, providers }, null, 1) + "\n");
-  writeFileSync(join(outDir, "skipped.json"), JSON.stringify({ meta, skipped: skipped.sort((a, b) => a.id.localeCompare(b.id)) }, null, 1) + "\n");
+  // Hand-maintained providers (data/extra-providers.json) that upstream doesn't ship
+  // in a usable form; the binary merges them in, so they aren't "skipped".
+  const extraIds = (() => {
+    try { return JSON.parse(readFileSync(join(outDir, "extra-providers.json"), "utf8")).providers.map((p) => p.id); } catch { return []; }
+  })();
+  const shipped = new Set(providers.map((p) => p.id));
+  const extras = extraIds.filter((id) => !shipped.has(id));
+  const stillSkipped = skipped.filter((s) => !extras.includes(s.id));
+  writeFileSync(join(outDir, "skipped.json"), JSON.stringify({ meta, skipped: stillSkipped.sort((a, b) => a.id.localeCompare(b.id)) }, null, 1) + "\n");
 
   const rows = (obj) => Object.entries(obj).map(([model, p]) => ({ model, ...p }));
   writeFileSync(join(outDir, "pricing.json"), JSON.stringify({
@@ -117,12 +125,12 @@ try {
 
   // Provider logos: copy upstream's PNG for every shipped provider (plus the two
   // synthetic compatible endpoints) into data/icons/, dropping stale files.
-  const ICON_ALIASES = { "perplexity-agent": "perplexity", "gitlab-duo": "gitlab", "vercel-ai-gateway": "vercel", "ollama-search": "ollama", "minimax-code": "minimax", "minimax-code-global": "minimax" };
+  const ICON_ALIASES = { "perplexity-agent": "perplexity", "gitlab-duo": "gitlab", "vercel-ai-gateway": "vercel", "ollama-search": "ollama", "minimax-code": "minimax", "minimax-code-global": "minimax", codestral: "mistral", zai: "glm" };
   const iconsDir = join(outDir, "icons");
   rmSync(iconsDir, { recursive: true, force: true });
   mkdirSync(iconsDir, { recursive: true });
   let copied = 0;
-  for (const id of [...providers.map(p => p.id), "oai-cc", "anthropic-m"]) {
+  for (const id of [...providers.map(p => p.id), ...extras, "oai-cc", "anthropic-m"]) {
     const iconSrc = join(upstream, "public", "providers", `${ICON_ALIASES[id] || id}.png`);
     if (existsSync(iconSrc)) { cpSync(iconSrc, join(iconsDir, `${id}.png`)); copied++; }
   }

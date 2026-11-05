@@ -13,6 +13,7 @@
 //! `refreshToken`, `expiresAt`, `providerSpecificData`), `authType` "oauth".
 
 pub mod codex;
+pub mod freebuff;
 pub mod hooks;
 pub mod opencode;
 pub mod util;
@@ -39,7 +40,9 @@ pub enum Flow {
 pub fn flow(provider: &str) -> Option<Flow> {
     match provider {
         "claude" | "xai" | "codex" | "cline" | "clinepass" => Some(Flow::Redirect),
-        "github" | "kimi" | "kilocode" | "minimax-code" | "minimax-code-global" | "nous" | "muse" => Some(Flow::Device),
+        "github" | "kimi" | "kilocode" | "minimax-code" | "minimax-code-global" | "nous" | "muse" | "freebuff" => {
+            Some(Flow::Device)
+        }
         _ => None,
     }
 }
@@ -356,6 +359,14 @@ async fn device_start(state: &AppState, provider: &str, sess: &mut Session) -> R
             return Ok(
                 json!({"flow": "device", "userCode": user_code, "verificationUri": uri, "verificationUriComplete": uri,
                 "interval": interval.max(1), "expiresIn": expires}),
+            );
+        }
+        "freebuff" => {
+            let (extra, url, expires_in) = freebuff::login_start(state).await?;
+            sess.extra = extra;
+            return Ok(
+                json!({"flow": "device", "userCode": "", "verificationUri": url, "verificationUriComplete": url,
+                "interval": 5, "expiresIn": expires_in}),
             );
         }
         "nous" => post_form(state, NOUS_DEVICE, &[("client_id", NOUS_CLIENT), ("scope", NOUS_SCOPE)], &[]).await?,
@@ -720,6 +731,13 @@ async fn poll_once(state: &AppState, sess: &Session) -> std::result::Result<Opti
             t.expires_in = t.expires_in.or(Some(3600));
             Ok(Some(t))
         }
+        "freebuff" => {
+            let Some(user) = freebuff::login_poll(state, &sess.extra).await? else { return Ok(None) };
+            let Some(token) = s(&user, "authToken") else {
+                return Err(PollError::Fatal(anyhow!("Freebuff sign-in returned no auth token")));
+            };
+            Ok(Some(Tokens { access: token, email: s(&user, "email"), name: s(&user, "name"), ..Default::default() }))
+        }
         "nous" => {
             let (_, v) = post_form(
                 state,
@@ -928,8 +946,12 @@ fn needs_refresh(c: &ProviderConnection) -> bool {
 }
 
 /// Make the account ready for a request: refresh OAuth tokens that are about to
-/// expire, mint the GitHub Copilot token, fetch the MiMo free-tier JWT.
-pub async fn prepare(state: &AppState, conn: ProviderConnection) -> Result<ProviderConnection> {
+/// expire, mint the GitHub Copilot token, fetch the MiMo free-tier JWT, open the Freebuff
+/// session for `model`.
+pub async fn prepare(state: &AppState, conn: ProviderConnection, model: &str) -> Result<ProviderConnection> {
+    if conn.provider == freebuff::ID {
+        return freebuff::prepare(state, conn, model).await;
+    }
     if hooks::is_mimo(&conn.provider) {
         let mut conn = conn;
         conn.data["accessToken"] = json!(hooks::mimo_jwt(state, false).await?);

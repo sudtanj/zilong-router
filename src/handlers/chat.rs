@@ -391,7 +391,7 @@ async fn attempt(
         tried += 1;
         // Refresh tokens that are about to expire, mint per-request tokens (Copilot, MiMo).
         let picked_id = picked.id.clone();
-        let conn = match crate::oauth::prepare(&state, picked).await {
+        let conn = match crate::oauth::prepare(&state, picked, &upstream_model).await {
             Ok(c) => c,
             Err(e) => {
                 let msg = format!("credentials could not be renewed ({e}); sign in again");
@@ -443,6 +443,9 @@ async fn attempt(
             }
             Err(e) => {
                 let (status, msg) = (e.status(), e.message());
+                if provider.id == crate::oauth::freebuff::ID {
+                    crate::oauth::freebuff::note_error(&conn.id, status, &msg);
+                }
                 if matches!(status, 401 | 403) && refreshed.insert(conn.id.clone()) {
                     if let Some(fresh) = crate::oauth::force_refresh(&state, &conn).await {
                         tracing::info!(

@@ -1536,6 +1536,48 @@
    "thinkingConfig": null
   },
   {
+   "id": "freebuff",
+   "alias": "fb",
+   "aliases": [],
+   "category": "oauth",
+   "authType": "oauth",
+   "authModes": null,
+   "noAuth": false,
+   "priority": 45,
+   "display": {
+    "name": "Freebuff",
+    "color": "#16A34A",
+    "textIcon": "FB",
+    "icon": "terminal",
+    "website": "https://freebuff.com",
+    "apiKeyUrl": "https://freebuff.com",
+    "deprecated": true,
+    "deprecationNotice": "⚠️ Risk Notice: This provider uses a Freebuff account session that its terms do not license for proxy/router use. Account may be restricted or banned. Use at your own risk."
+   },
+   "transport": {
+    "baseUrl": "https://www.codebuff.com/api/v1/chat/completions",
+    "format": "openai",
+    "forceStream": true,
+    "headers": {}
+   },
+   "transports": null,
+   "oauth": null,
+   "models": [
+    {
+     "id": "glm-5.3-flash",
+     "name": "GLM 5.3 Flash"
+    },
+    {
+     "id": "deepseek-v4.1-flash",
+     "name": "DeepSeek V4.1 Flash"
+    },
+    {
+     "id": "mimo-v2.6-flash",
+     "name": "MiMo V2.6 Flash"
+    }
+   ]
+  },
+  {
    "id": "codex",
    "alias": "cx",
    "aliases": [],

@@ -12,7 +12,7 @@ use axum::http::HeaderMap;
 use parking_lot::Mutex;
 use serde_json::{json, Value};
 
-use super::{codex, opencode, util};
+use super::{codex, freebuff, opencode, util};
 use crate::db::ProviderConnection;
 use crate::providers::{Format, Provider, Transport};
 use crate::sse::Event;
@@ -150,6 +150,7 @@ pub fn headers(
 ) {
     match provider.id.as_str() {
         opencode::ID => opencode::headers(client, model, h),
+        freebuff::ID => freebuff::headers(conn, body, h),
         codex::ID => codex_headers(conn, model, body, h),
         "kimi" => {
             for (k, v) in util::kimi_headers(psd_str(conn, "deviceId")) {
@@ -327,6 +328,7 @@ pub fn body(
             mimo_marker(&mut b);
             Some((b, Restore::None))
         }
+        freebuff::ID => Some((freebuff::body(conn, body), Restore::None)),
         codex::ID if target == Format::Openai => {
             let session = codex_session(conn, body);
             Some((crate::translator::codex::chat_to_responses(body, model, &session), Restore::None))

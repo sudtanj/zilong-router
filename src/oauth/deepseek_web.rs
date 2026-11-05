@@ -119,7 +119,13 @@ fn fake_cookie() -> String {
     let now = time::OffsetDateTime::now_utc();
     let ms = now.unix_timestamp_nanos() / 1_000_000;
     let uuid = || uuid::Uuid::new_v4().to_string();
-    format!("intercom-HWWAFSESTIME={ms}; HWWAFSESID={}; Hm_lvt_{}={}; _frid={}", util::random_hex(9), uuid(), now.unix_timestamp(), uuid())
+    format!(
+        "intercom-HWWAFSESTIME={ms}; HWWAFSESID={}; Hm_lvt_{}={}; _frid={}",
+        util::random_hex(9),
+        uuid(),
+        now.unix_timestamp(),
+        uuid()
+    )
 }
 
 /// DeepSeek's reply envelope: `{code, msg, data: {biz_code, biz_msg, biz_data}}`.
@@ -127,7 +133,10 @@ fn biz_data(v: &Value) -> Result<&Value, ExecError> {
     let code = v.get("code").and_then(Value::as_i64).unwrap_or(0);
     let biz = v.pointer("/data/biz_code").and_then(Value::as_i64).unwrap_or(0);
     if code == 0 && biz == 0 {
-        return v.pointer("/data/biz_data").or_else(|| v.get("biz_data")).ok_or_else(|| fail(502, "DeepSeek answered without data"));
+        return v
+            .pointer("/data/biz_data")
+            .or_else(|| v.get("biz_data"))
+            .ok_or_else(|| fail(502, "DeepSeek answered without data"));
     }
     let msg = v
         .pointer("/data/biz_msg")
@@ -136,14 +145,19 @@ fn biz_data(v: &Value) -> Result<&Value, ExecError> {
         .or_else(|| v.get("msg").and_then(Value::as_str))
         .unwrap_or("request refused");
     let lower = msg.to_ascii_lowercase();
-    let status = if code == 40003 || (lower.contains("token") && (lower.contains("invalid") || lower.contains("expired"))) {
-        401
-    } else if code == 40002 || lower.contains("frequent") || lower.contains("rate limit") {
-        429
+    let status =
+        if code == 40003 || (lower.contains("token") && (lower.contains("invalid") || lower.contains("expired"))) {
+            401
+        } else if code == 40002 || lower.contains("frequent") || lower.contains("rate limit") {
+            429
+        } else {
+            502
+        };
+    Err(if status == 401 {
+        fail(401, TOKEN_REJECTED)
     } else {
-        502
-    };
-    Err(if status == 401 { fail(401, TOKEN_REJECTED) } else { fail(status, format!("DeepSeek error {code}/{biz}: {msg}")) })
+        fail(status, format!("DeepSeek error {code}/{biz}: {msg}"))
+    })
 }
 
 fn http_error(status: u16, text: &str) -> ExecError {
@@ -160,7 +174,8 @@ async fn json_of(resp: reqwest::Response) -> Result<Value, ExecError> {
     if !(200..300).contains(&status) {
         return Err(http_error(status, &text));
     }
-    serde_json::from_str(&text).map_err(|_| fail(502, format!("DeepSeek returned non-JSON: {}", text.chars().take(200).collect::<String>())))
+    serde_json::from_str(&text)
+        .map_err(|_| fail(502, format!("DeepSeek returned non-JSON: {}", text.chars().take(200).collect::<String>())))
 }
 
 fn call(state: &AppState, method: Method, path: &str, token: &str, cookie: &str) -> RequestBuilder {
@@ -175,16 +190,24 @@ fn call(state: &AppState, method: Method, path: &str, token: &str, cookie: &str)
 async fn access(state: &AppState, conn_id: &str, user_token: &str) -> Result<(String, String), ExecError> {
     let known = {
         let accounts = ACCOUNTS.lock();
-        accounts.get(conn_id).filter(|a| a.user_token == user_token).map(|a| (a.access.clone(), a.cookie.clone(), a.expires))
+        accounts
+            .get(conn_id)
+            .filter(|a| a.user_token == user_token)
+            .map(|a| (a.access.clone(), a.cookie.clone(), a.expires))
     };
     let cookie = match known {
         Some((access, cookie, expires)) if expires > Instant::now() => return Ok((access, cookie)),
         Some((_, cookie, _)) => cookie,
         None => fake_cookie(),
     };
-    let resp = call(state, Method::GET, "/api/v0/users/current", user_token, &cookie).timeout(HTTP_TIMEOUT).send().await.map_err(network)?;
+    let resp = call(state, Method::GET, "/api/v0/users/current", user_token, &cookie)
+        .timeout(HTTP_TIMEOUT)
+        .send()
+        .await
+        .map_err(network)?;
     let v = json_of(resp).await?;
-    let access = biz_data(&v)?.get("token").and_then(Value::as_str).ok_or_else(|| fail(401, TOKEN_REJECTED))?.to_string();
+    let access =
+        biz_data(&v)?.get("token").and_then(Value::as_str).ok_or_else(|| fail(401, TOKEN_REJECTED))?.to_string();
     ACCOUNTS.lock().insert(
         conn_id.to_string(),
         Account {
@@ -198,7 +221,12 @@ async fn access(state: &AppState, conn_id: &str, user_token: &str) -> Result<(St
 }
 
 async fn create_session(state: &AppState, access: &str, cookie: &str) -> Result<String, ExecError> {
-    let resp = call(state, Method::POST, "/api/v0/chat_session/create", access, cookie).timeout(HTTP_TIMEOUT).json(&json!({})).send().await.map_err(network)?;
+    let resp = call(state, Method::POST, "/api/v0/chat_session/create", access, cookie)
+        .timeout(HTTP_TIMEOUT)
+        .json(&json!({}))
+        .send()
+        .await
+        .map_err(network)?;
     let v = json_of(resp).await?;
     let data = biz_data(&v)?;
     data.pointer("/chat_session/id")
@@ -210,7 +238,12 @@ async fn create_session(state: &AppState, access: &str, cookie: &str) -> Result<
 
 async fn pow_challenge(state: &AppState, access: &str, cookie: &str) -> Result<Challenge, ExecError> {
     let body = json!({"target_path": COMPLETION_PATH});
-    let resp = call(state, Method::POST, "/api/v0/chat/create_pow_challenge", access, cookie).timeout(HTTP_TIMEOUT).json(&body).send().await.map_err(network)?;
+    let resp = call(state, Method::POST, "/api/v0/chat/create_pow_challenge", access, cookie)
+        .timeout(HTTP_TIMEOUT)
+        .json(&body)
+        .send()
+        .await
+        .map_err(network)?;
     let v = json_of(resp).await?;
     let ch = biz_data(&v)?.get("challenge").ok_or_else(|| fail(502, "DeepSeek returned no proof-of-work challenge"))?;
     Challenge::parse(ch).map_err(|e| fail(502, format!("DeepSeek proof-of-work challenge: {e}")))
@@ -257,7 +290,11 @@ async fn complete(
         let status = resp.status().as_u16();
         return Err(http_error(status, &resp.text().await.unwrap_or_default()));
     }
-    let json = resp.headers().get("content-type").and_then(|v| v.to_str().ok()).is_some_and(|ct| ct.contains("application/json"));
+    let json = resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|ct| ct.contains("application/json"));
     if json {
         // Refusals (rate limit, bad token) come as a JSON body with status 200.
         let v = json_of(resp).await?;
@@ -306,7 +343,8 @@ async fn pump(
             Ok(None) => break,
             Err(_) if tr.finished => break,
             Err(_) => {
-                let _ = tx.send(Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "DeepSeek stream stalled"))).await;
+                let _ =
+                    tx.send(Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "DeepSeek stream stalled"))).await;
                 return;
             }
         };
@@ -345,11 +383,17 @@ fn relay(
     let (tx, rx) = mpsc::channel(32);
     tokio::spawn(pump(resp, tr, req, conn_id, session, stall, tx));
     let body = reqwest::Body::wrap_stream(ReceiverStream::new(rx));
-    let resp = axum::http::Response::builder().status(200).header("content-type", "text/event-stream").body(body).unwrap();
+    let resp =
+        axum::http::Response::builder().status(200).header("content-type", "text/event-stream").body(body).unwrap();
     reqwest::Response::from(resp)
 }
 
-async fn run(state: &AppState, conn: &ProviderConnection, model: &str, body: &Value) -> Result<reqwest::Response, ExecError> {
+async fn run(
+    state: &AppState,
+    conn: &ProviderConnection,
+    model: &str,
+    body: &Value,
+) -> Result<reqwest::Response, ExecError> {
     let token = conn.secret().and_then(user_token).ok_or_else(|| {
         fail(401, "this account has no DeepSeek userToken; paste the userToken from chat.deepseek.com localStorage")
     })?;
@@ -379,7 +423,12 @@ async fn run(state: &AppState, conn: &ProviderConnection, model: &str, body: &Va
 }
 
 /// Send a chat completion request (OpenAI shape) to DeepSeek Web.
-pub async fn send(state: &AppState, conn: &ProviderConnection, model: &str, body: &Value) -> Result<reqwest::Response, ExecError> {
+pub async fn send(
+    state: &AppState,
+    conn: &ProviderConnection,
+    model: &str,
+    body: &Value,
+) -> Result<reqwest::Response, ExecError> {
     let result = run(state, conn, model, body).await;
     if matches!(&result, Err(e) if e.status() == 401) {
         ACCOUNTS.lock().remove(&conn.id);
@@ -425,7 +474,10 @@ mod tests {
 
     #[test]
     fn completion_request_matches_the_web_client() {
-        let req = Request::from_body("deepseek-v4-pro-think-search", &json!({"messages": [{"role": "user", "content": "hi"}]}));
+        let req = Request::from_body(
+            "deepseek-v4-pro-think-search",
+            &json!({"messages": [{"role": "user", "content": "hi"}]}),
+        );
         let body = completion_body(&req, "sid", Some(7), "hi");
         assert_eq!(
             body,

@@ -148,7 +148,10 @@ impl Challenge {
             challenge: text("challenge").ok_or_else(|| anyhow!("challenge has no digest"))?,
             salt: text("salt").ok_or_else(|| anyhow!("challenge has no salt"))?,
             signature: text("signature").ok_or_else(|| anyhow!("challenge has no signature"))?,
-            difficulty: v.get("difficulty").and_then(Value::as_u64).ok_or_else(|| anyhow!("challenge has no difficulty"))?,
+            difficulty: v
+                .get("difficulty")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| anyhow!("challenge has no difficulty"))?,
             expire_at: v.get("expire_at").and_then(Value::as_i64).ok_or_else(|| anyhow!("challenge has no expiry"))?,
         })
     }

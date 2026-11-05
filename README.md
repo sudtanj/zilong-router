@@ -144,11 +144,14 @@ refreshed automatically before they expire (and once more after a 401).
 | xAI (`xai`), Cline, Cline Pass | Same: paste the callback address. xAI always lands on `http://127.0.0.1:56121/callback`. |
 | OpenAI Codex (`codex`, `cx`) | ChatGPT Plus/Pro/Team sign-in as the Codex CLI does it: paste the callback address (`http://localhost:1455/auth/callback?code=…`). The account id is read from the id token and sent with every request. |
 | Freebuff (`freebuff`, `fb`) | The dashboard shows a link instead of a code: open it, sign in on freebuff.com, and the dashboard notices (it polls like the Freebuff CLI does). |
+| DeepSeek Web (`deepseek-web`, `ds-web`) | Paste the `userToken` of your chat.deepseek.com session: log in there, open DevTools, Application, Local Storage, `https://chat.deepseek.com`, copy the value of `userToken` (the raw token or the whole `{"value": …}` text both work), then **Add Connection**. When DeepSeek rejects it the account is marked expired: paste a fresh one with **Edit**. |
 | GitHub Copilot, Kimi, Kilo Code, MiniMax Code (CN / global), Nous, Muse | Device code: the dashboard shows a code, you enter it on the provider's page, the dashboard notices when you approve. |
 
-Claude Code, OpenAI Codex, GitHub Copilot and Freebuff carry a risk notice: they use a subscription or free-tier session
+Claude Code, OpenAI Codex, GitHub Copilot, Freebuff and DeepSeek Web carry a risk notice: they use a subscription, free-tier or web session
 that is not licensed for proxy use, so the account may be restricted or banned. The
 dashboard shows that warning on their pages.
+
+DeepSeek Web talks to the site's own API as its web client does (access token from `/users/current`, `chat_session/create`, the DeepSeekHashV1 proof of work solved natively on the blocking pool, then `chat/completion`), with the web client's headers. Model ids pick Pro or Flash and the thinking and search switches (`deepseek-v4-pro-think-search`, `deepseek-reasoner`, …). The web API has no tools or message list, so tool definitions and history are written into the prompt and `<tool>` blocks are parsed back into tool calls. A conversation whose last reply came from this router continues in the same chat (`parent_message_id`) and sends only the new turns; chats stay in the account's DeepSeek history. Not sent: the client's signed `x-hif-leim` header; usage is estimated, and search references are shown as `[n]` without the source list.
 
 Behind the scenes, as upstream does: Claude sign-ins send Claude Code's identity (system
 prompt, billing header, `metadata.user_id`) and rename tools so they don't clash with

@@ -604,7 +604,9 @@ mod tests {
         let p = r.prompt(0);
         assert!(p.starts_with("Be brief.\n\nYou can call tools."));
         assert!(p.contains("- ls: List\n  parameters: {\"type\":\"object\"}"));
-        assert!(p.contains("User: list files\n\nAssistant: Looking.\n<tool>{\"name\":\"ls\",\"arguments\":{\"path\":\".\"}}</tool>"));
+        assert!(p.contains(
+            "User: list files\n\nAssistant: Looking.\n<tool>{\"name\":\"ls\",\"arguments\":{\"path\":\".\"}}</tool>"
+        ));
         assert!(p.contains("Tool result (ls): a.txt\n\nContinue the task"));
         assert!(!p.contains("data:x"));
     }
@@ -683,17 +685,24 @@ mod tests {
 
     #[test]
     fn thinking_and_answer_fragments_become_chunks() {
-        let req = Request::from_body("deepseek-v4-pro-think", &json!({"messages": [{"role": "user", "content": "hi"}]}));
+        let req =
+            Request::from_body("deepseek-v4-pro-think", &json!({"messages": [{"role": "user", "content": "hi"}]}));
         let (chunks, tr) = run(
             &req,
             vec![
                 Event::named("ready", r#"{"request_message_id":1,"response_message_id":2}"#),
-                ev(json!({"v": {"response": {"message_id": 2, "fragments": [{"id": 1, "type": "THINK", "content": "Hm"}]}}})),
+                ev(
+                    json!({"v": {"response": {"message_id": 2, "fragments": [{"id": 1, "type": "THINK", "content": "Hm"}]}}}),
+                ),
                 ev(json!({"p": "response/fragments/-1/content", "o": "APPEND", "v": "m."})),
                 ev(json!({"v": " ok"})),
-                ev(json!({"p": "response/fragments", "o": "APPEND", "v": [{"id": 2, "type": "RESPONSE", "content": "Hel"}]})),
+                ev(
+                    json!({"p": "response/fragments", "o": "APPEND", "v": [{"id": 2, "type": "RESPONSE", "content": "Hel"}]}),
+                ),
                 ev(json!({"v": "lo"})),
-                ev(json!({"p": "response", "o": "BATCH", "v": [{"p": "accumulated_token_usage", "v": 9}, {"p": "quasi_status", "v": "FINISHED"}]})),
+                ev(
+                    json!({"p": "response", "o": "BATCH", "v": [{"p": "accumulated_token_usage", "v": 9}, {"p": "quasi_status", "v": "FINISHED"}]}),
+                ),
                 ev(json!({"p": "response/status", "o": "SET", "v": "FINISHED"})),
                 Event::named("close", "{}"),
             ],
@@ -709,12 +718,15 @@ mod tests {
 
     #[test]
     fn search_fragments_are_skipped_and_citations_rewritten() {
-        let req = Request::from_body("deepseek-v4-flash-search", &json!({"messages": [{"role": "user", "content": "q"}]}));
+        let req =
+            Request::from_body("deepseek-v4-flash-search", &json!({"messages": [{"role": "user", "content": "q"}]}));
         let (chunks, _) = run(
             &req,
             vec![
                 ev(json!({"v": {"response": {"fragments": [{"type": "SEARCH", "content": "", "results": []}]}}})),
-                ev(json!({"p": "response/fragments", "o": "APPEND", "v": [{"type": "RESPONSE", "content": "It is [cita"}]})),
+                ev(
+                    json!({"p": "response/fragments", "o": "APPEND", "v": [{"type": "RESPONSE", "content": "It is [cita"}]}),
+                ),
                 ev(json!({"v": "tion:"})),
                 ev(json!({"v": "2] true [x"})),
             ],
@@ -728,7 +740,9 @@ mod tests {
         let (chunks, tr) = run(
             &req,
             vec![
-                ev(json!({"p": "response/fragments", "o": "APPEND", "v": [{"type": "RESPONSE", "content": "Checking <to"}]})),
+                ev(
+                    json!({"p": "response/fragments", "o": "APPEND", "v": [{"type": "RESPONSE", "content": "Checking <to"}]}),
+                ),
                 ev(json!({"v": "ol>{\"name\":\"ls\","})),
                 ev(json!({"v": "\"arguments\":{\"path\":\"/\"}}</tool>"})),
                 ev(json!({"p": "response/status", "v": "FINISHED"})),
@@ -747,7 +761,9 @@ mod tests {
         let req = Request::from_body("deepseek-chat", &body());
         let (chunks, _) = run(
             &req,
-            vec![ev(json!({"p": "response/fragments", "o": "APPEND", "v": [{"type": "RESPONSE", "content": "Write <tool> to call."}]}))],
+            vec![ev(
+                json!({"p": "response/fragments", "o": "APPEND", "v": [{"type": "RESPONSE", "content": "Write <tool> to call."}]}),
+            )],
         );
         assert_eq!(deltas(&chunks, "content"), "Write <tool> to call.");
         assert_eq!(chunks.last().unwrap()["choices"][0]["finish_reason"], "stop");
@@ -756,8 +772,13 @@ mod tests {
     #[test]
     fn upstream_refusal_is_reported_in_the_answer() {
         let req = Request::from_body("deepseek-chat", &json!({"messages": [{"role": "user", "content": "q"}]}));
-        let (chunks, tr) =
-            run(&req, vec![Event::named("hint", r#"{"type":"error","content":"Messages too frequent","finish_reason":"rate_limit_reached"}"#)]);
+        let (chunks, tr) = run(
+            &req,
+            vec![Event::named(
+                "hint",
+                r#"{"type":"error","content":"Messages too frequent","finish_reason":"rate_limit_reached"}"#,
+            )],
+        );
         assert!(deltas(&chunks, "content").contains("Messages too frequent"));
         assert!(tr.finished);
     }

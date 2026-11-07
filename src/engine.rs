@@ -721,6 +721,10 @@ impl<H: Http + 'static, S: Store + 'static> Engine<H, S> {
 
     /// `/v1/responses` (OpenAI Responses API, what Codex speaks), served by [`Engine::chat`].
     pub async fn responses(&self, req: Request<'_>) -> Reply {
+        // Key first: a caller without one learns nothing about what the body should look like.
+        if let Err(e) = self.authorize(&req, &[]).await {
+            return e.reply(Format::Openai);
+        }
         let v: Value = match serde_json::from_slice(req.body) {
             Ok(v) => v,
             Err(e) => return Reply::error(Format::Openai, 400, &format!("invalid JSON body: {e}")),

@@ -242,6 +242,7 @@ impl Registry {
         let mut providers = file.providers;
         let extras: File = serde_json::from_str(EXTRA_PROVIDERS)?;
         merge_extras(&mut providers, extras.providers);
+        fix_upstream_urls(&mut providers);
         crate::oauth::hooks::patch_registry(&mut providers);
         providers.push(synthetic(OPENAI_COMPATIBLE, "OpenAI Compatible", Format::Openai));
         providers.push(synthetic(ANTHROPIC_COMPATIBLE, "Anthropic Compatible", Format::Claude));
@@ -286,6 +287,22 @@ fn merge_extras(providers: &mut Vec<Provider>, extras: Vec<Provider>) {
         p.aliases.retain(|a| !taken.contains(a));
         taken.extend(names(&p));
         providers.push(p);
+    }
+}
+
+/// Upstream endpoints that do not match the vendor's own docs: Cohere serves its OpenAI
+/// layer under /compatibility (there is no /v1/chat/completions), and Blackbox's public
+/// API has no /v1 prefix.
+fn fix_upstream_urls(providers: &mut [Provider]) {
+    for p in providers {
+        let url = match p.id.as_str() {
+            "cohere" => "https://api.cohere.ai/compatibility/v1/chat/completions",
+            "blackbox" => "https://api.blackbox.ai/chat/completions",
+            _ => continue,
+        };
+        if let Some(t) = p.transport.as_mut() {
+            t.base_url = url.to_string();
+        }
     }
 }
 

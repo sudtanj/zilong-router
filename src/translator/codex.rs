@@ -18,7 +18,20 @@ pub const DEFAULT_INSTRUCTIONS: &str = include_str!("codex_instructions.txt");
 
 /// Models served over the "Responses Lite" transport: tools and instructions travel as
 /// input items instead of top-level fields.
-const LITE_MODELS: [&str; 4] = ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna"];
+/// (Codex CLI catalogue `models-manager/models.json`: every model but `gpt-5.5`.)
+const LITE_MODELS: [&str; 11] = [
+    "gpt-6-astra",
+    "gpt-6.1-sol",
+    "gpt-6.1-terra",
+    "gpt-6-sol",
+    "gpt-6-luna",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-daybreak-blue-latest",
+    "gpt-daybreak-red-latest",
+    "codex-auto-review",
+];
 const EFFORTS: [&str; 6] = ["none", "minimal", "low", "medium", "high", "xhigh"];
 const MAX_NAME: usize = 128;
 const MAX_CALL_ID: usize = 64;
@@ -467,7 +480,7 @@ mod tests {
         assert_eq!(lite["input"][0]["type"], "additional_tools");
         assert_eq!(lite["input"][1]["role"], "developer");
         assert_eq!(lite["reasoning"]["effort"], "medium");
-        assert!(is_lite("gpt-6-luna-high") && !is_lite("gpt-6-astra"));
+        assert!(is_lite("gpt-6-luna-high") && !is_lite("gpt-5.5"));
     }
 
     #[test]

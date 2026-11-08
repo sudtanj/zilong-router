@@ -15,7 +15,7 @@ pub const TOKEN: &str = "https://auth.openai.com/oauth/token";
 /// Fixed loopback redirect registered for the Codex CLI client.
 pub const REDIRECT: &str = "http://localhost:1455/auth/callback";
 pub const SCOPE: &str = "openid profile email offline_access";
-const CLI_VERSION: &str = "0.159.0";
+pub const CLI_VERSION: &str = "0.159.0";
 const AUTH_CLAIM: &str = "https://api.openai.com/auth";
 const PROFILE_CLAIM: &str = "https://api.openai.com/profile";
 

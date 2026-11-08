@@ -472,7 +472,7 @@ mod tests {
     #[test]
     fn default_instructions_and_lite_models() {
         let body = json!({"messages": [{"role": "user", "content": "hi"}]});
-        let r = chat_to_responses(&body, "gpt-5.6-sol", "s");
+        let r = chat_to_responses(&body, "gpt-5.5", "s");
         assert!(r["instructions"].as_str().unwrap().starts_with("You are Codex"));
         assert!(r.get("tools").is_none());
         let lite = chat_to_responses(&body, "gpt-6-sol[1m]", "s");

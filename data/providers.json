@@ -1048,76 +1048,6 @@
    "thinkingConfig": null
   },
   {
-   "id": "chatgpt-web",
-   "alias": "chatgpt-web",
-   "aliases": [
-    "cg"
-   ],
-   "category": "webCookie",
-   "authType": "cookie",
-   "authModes": null,
-   "noAuth": false,
-   "priority": 220,
-   "display": {
-    "name": "ChatGPT Web",
-    "color": "#10A37F",
-    "textIcon": "CG",
-    "icon": "auto_awesome",
-    "website": "https://chatgpt.com",
-    "apiKeyUrl": null,
-    "deprecated": false,
-    "deprecationNotice": null
-   },
-   "transport": {
-    "baseUrl": "https://chatgpt.com",
-    "format": "openai",
-    "authType": "cookie"
-   },
-   "transports": null,
-   "oauth": null,
-   "models": [
-    {
-     "id": "gpt-5-6",
-     "name": "GPT-5.6 Sol — Instant"
-    },
-    {
-     "id": "gpt-5-6-thinking",
-     "name": "GPT-5.6 Sol — Thinking",
-     "supportsReasoning": true
-    },
-    {
-     "id": "gpt-5-6-pro",
-     "name": "GPT-5.6 Sol — Pro",
-     "supportsReasoning": true
-    },
-    {
-     "id": "gpt-5.6-luna-free",
-     "name": "GPT-5.6 Luna — Free"
-    },
-    {
-     "id": "gpt-5.6-luna-free-thinking",
-     "name": "GPT-5.6 Luna — Free Thinking",
-     "supportsReasoning": true
-    },
-    {
-     "id": "gpt-5-5-instant",
-     "name": "GPT-5.5 — Instant"
-    },
-    {
-     "id": "gpt-5-5-thinking",
-     "name": "GPT-5.5 — Thinking",
-     "supportsReasoning": true
-    },
-    {
-     "id": "gpt-5-5-pro",
-     "name": "GPT-5.5 — Pro",
-     "supportsReasoning": true
-    }
-   ],
-   "passthroughModels": false,
-   "thinkingConfig": null
-  },
-  {
    "id": "chutes",
    "alias": "chutes",
    "aliases": [
@@ -2129,51 +2059,6 @@
     {
      "id": "accounts/fireworks/models/qwen3-235b-a22b",
      "name": "Qwen3 235B"
-    }
-   ],
-   "passthroughModels": false,
-   "thinkingConfig": null
-  },
-  {
-   "id": "gemini-web",
-   "alias": "gemini-web",
-   "aliases": [
-    "gweb"
-   ],
-   "category": "webCookie",
-   "authType": "cookie",
-   "authModes": null,
-   "noAuth": false,
-   "priority": 220,
-   "display": {
-    "name": "Gemini Web",
-    "color": "#4285F4",
-    "textIcon": "GW",
-    "icon": "auto_awesome",
-    "website": "https://gemini.google.com",
-    "apiKeyUrl": null,
-    "deprecated": false,
-    "deprecationNotice": null
-   },
-   "transport": {
-    "baseUrl": "https://gemini.google.com/app",
-    "format": "openai",
-    "authType": "cookie"
-   },
-   "transports": null,
-   "oauth": null,
-   "models": [
-    {
-     "id": "gemini-3.1-pro",
-     "name": "Gemini 3.1 Pro"
-    },
-    {
-     "id": "gemini-3.7-flash",
-     "name": "Gemini 3.7 Flash"
-    },
-    {
-     "id": "gemini-3.1-flash-lite",
-     "name": "Gemini 3.1 Flash-Lite"
     }
    ],
    "passthroughModels": false,
@@ -3625,43 +3510,6 @@
    "thinkingConfig": null
   },
   {
-   "id": "muse-web",
-   "alias": "muse-web",
-   "aliases": [
-    "mu"
-   ],
-   "category": "webCookie",
-   "authType": "cookie",
-   "authModes": null,
-   "noAuth": false,
-   "priority": 220,
-   "display": {
-    "name": "Muse Web",
-    "color": "#7C3AED",
-    "textIcon": "MU",
-    "icon": "auto_awesome",
-    "website": "https://muse.ai",
-    "apiKeyUrl": null,
-    "deprecated": false,
-    "deprecationNotice": null
-   },
-   "transport": {
-    "baseUrl": "https://muse.ai",
-    "format": "openai",
-    "authType": "cookie"
-   },
-   "transports": null,
-   "oauth": null,
-   "models": [
-    {
-     "id": "muse-chat",
-     "name": "Muse Chat"
-    }
-   ],
-   "passthroughModels": false,
-   "thinkingConfig": null
-  },
-  {
    "id": "nanobanana",
    "alias": "nanobanana",
    "aliases": [
@@ -4727,36 +4575,6 @@
     ],
     "defaultMode": "high"
    }
-  },
-  {
-   "id": "uc-web",
-   "alias": "uc",
-   "aliases": [],
-   "category": "webCookie",
-   "authType": "cookie",
-   "authModes": null,
-   "noAuth": false,
-   "priority": 180,
-   "display": {
-    "name": "UC Web",
-    "color": "#F43F5E",
-    "textIcon": "UC",
-    "icon": "explicit",
-    "website": "https://uncensored.com",
-    "apiKeyUrl": null,
-    "deprecated": false,
-    "deprecationNotice": null
-   },
-   "transport": {
-    "baseUrl": "https://internal.chatuncensored.ai",
-    "format": "openai",
-    "authType": "cookie"
-   },
-   "transports": null,
-   "oauth": null,
-   "models": [],
-   "passthroughModels": true,
-   "thinkingConfig": null
   },
   {
    "id": "venice",

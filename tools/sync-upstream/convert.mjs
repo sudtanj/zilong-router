@@ -43,7 +43,7 @@ try {
 
   // Providers whose upstream code has a dedicated executor (open-sse/executors/*.js);
   // they need Rust work beyond config and are filtered out for now.
-  const SPECIAL_EXECUTORS = new Set(["antigravity","azure","bedrock","bedrock-xai","codebuddy-cn","codebuddy-intl","codex","commandcode","cursor","devin-cli","gemini-cli","github","grok-cli","grok-web","iflow","kimchi","kiro","mimo-free","minimax-code","minimax-code-global","ollama-local","opencode","opencode-go","opencode-zen","perplexity-web","qoder","qoder-cn","trae","vertex","vertex-partner","windsurf","xiaomi-mimo","xiaomi-tokenplan","zed"]);
+  const SPECIAL_EXECUTORS = new Set(["antigravity","azure","chatgpt-web","bedrock","bedrock-xai","codebuddy-cn","codebuddy-intl","codex","commandcode","cursor","devin-cli","gemini-cli","gemini-web","github","grok-cli","grok-web","iflow","kimchi","kiro","mimo-free","muse-web","minimax-code","minimax-code-global","ollama-local","opencode","opencode-go","opencode-zen","perplexity-web","qoder","qoder-cn","trae","uc-web","vertex","vertex-partner","windsurf","xiaomi-mimo","xiaomi-tokenplan","zed"]);
   // Upstream-special providers zilong-router implements natively (src/oauth): their
   // sign-in, token refresh and request quirks are ported, so keep them.
   const RISK_NOTICE = "⚠️ Risk Notice: This provider uses a subscription/OAuth session not officially licensed for proxy/router use. Account may be restricted or banned. Use at your own risk.";

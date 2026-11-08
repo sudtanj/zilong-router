@@ -46,6 +46,11 @@
    "reason": "no LLM transport (media-only provider)"
   },
   {
+   "id": "chatgpt-web",
+   "name": "ChatGPT Web",
+   "reason": "needs a dedicated executor"
+  },
+  {
    "id": "codebuddy-cn",
    "name": "CodeBuddy CN",
    "reason": "needs a dedicated executor"
@@ -108,6 +113,11 @@
   {
    "id": "gemini-cli",
    "name": "Gemini CLI",
+   "reason": "needs a dedicated executor"
+  },
+  {
+   "id": "gemini-web",
+   "name": "Gemini Web",
    "reason": "needs a dedicated executor"
   },
   {
@@ -179,6 +189,11 @@
    "id": "local-device",
    "name": "Local Device",
    "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "muse-web",
+   "name": "Muse Web",
+   "reason": "needs a dedicated executor"
   },
   {
    "id": "nace",
@@ -304,6 +319,11 @@
    "id": "tortoise",
    "name": "Tortoise TTS",
    "reason": "no LLM transport (media-only provider)"
+  },
+  {
+   "id": "uc-web",
+   "name": "UC Web",
+   "reason": "needs a dedicated executor"
   },
   {
    "id": "v1m",

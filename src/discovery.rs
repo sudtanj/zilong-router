@@ -156,7 +156,11 @@ async fn fetch(state: &AppState, conn: &ProviderConnection) -> anyhow::Result<Ve
     if !t.format.supported() {
         bail!("{} endpoints are not supported", t.format.as_str());
     }
-    let url = format!("{}/models", api_root(conn.base_url_override().unwrap_or(&t.base_url)));
+    let mut url = format!("{}/models", api_root(conn.base_url_override().unwrap_or(&t.base_url)));
+    if crate::oauth::hooks::is_codex(&conn.provider) {
+        // The ChatGPT backend refuses the catalogue without the client version, as the Codex CLI sends it.
+        url = format!("{url}?client_version={}", crate::oauth::codex::CLI_VERSION);
+    }
     let mut rb = state.http.get(&url).timeout(TIMEOUT);
     for (k, v) in crate::executor::build_headers(state, p, t, conn, &HeaderMap::new(), "", &Value::Null, false) {
         if !k.eq_ignore_ascii_case("content-type") {
@@ -171,12 +175,13 @@ async fn fetch(state: &AppState, conn: &ProviderConnection) -> anyhow::Result<Ve
     Ok(parse_ids(&v))
 }
 
-/// `{data: [{id}]}` (OpenAI, Anthropic) or `{models: [{id|name}]}` (Ollama style).
+/// `{data: [{id}]}` (OpenAI, Anthropic) or `{models: [{id|name|slug}]}` (Ollama, Codex).
 fn parse_ids(v: &Value) -> Vec<String> {
     let items = v.get("data").or_else(|| v.get("models")).and_then(Value::as_array);
     let mut out: Vec<String> = Vec::new();
     for item in items.into_iter().flatten() {
-        let id = item.as_str().or_else(|| item.get("id").or_else(|| item.get("name")).and_then(Value::as_str));
+        let named = item.get("id").or_else(|| item.get("name")).or_else(|| item.get("slug"));
+        let id = item.as_str().or_else(|| named.and_then(Value::as_str));
         if let Some(id) = id.map(str::trim).filter(|s| !s.is_empty() && is_chat_model(s)) {
             if !out.iter().any(|m| m == id) {
                 out.push(id.to_string());

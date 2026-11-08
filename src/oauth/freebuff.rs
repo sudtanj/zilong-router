@@ -300,10 +300,14 @@ fn norm(s: &str) -> String {
     s.chars().filter(char::is_ascii_alphanumeric).map(|c| c.to_ascii_lowercase()).collect()
 }
 
-/// The catalogue row for a router model id ("glm-5.3-flash" matches "GLM 5.3 Flash").
+/// The catalogue row for a router model id ("glm-5.3-flash" matches "GLM 5.3 Flash"). Failing an
+/// exact match, the shortest name starting with it wins: the CLI's names carry a suffix
+/// ("DeepSeek V4.1 Flash 10/17", "MiMo v2.6 Flash Fast") that the router ids leave out.
 fn find_row(c: &Catalog, model: &str) -> Option<Row> {
     let want = norm(model);
-    c.rows.iter().find(|r| norm(&r.name) == want || norm(&r.key) == want).cloned()
+    let exact = c.rows.iter().find(|r| norm(&r.name) == want || norm(&r.key) == want);
+    let prefixed = || c.rows.iter().filter(|r| norm(&r.name).starts_with(&want)).min_by_key(|r| r.name.len());
+    exact.or_else(prefixed).cloned()
 }
 
 async fn admit(http: &Client, token: &str, dev: Option<&Device>, fetch_id: Option<&str>, row: &Row) -> Result<Session> {
@@ -559,6 +563,10 @@ mod tests {
         assert_eq!(find_row(&c, "glm-5.3-flash").unwrap().handle, "fbm1.aaa");
         assert_eq!(find_row(&c, "deepseek-v4.1-flash").unwrap().key, "ds");
         assert!(find_row(&c, "big-pro").is_none());
+        let mut c = c;
+        let row = |key: &str, name: &str| Row { key: key.into(), handle: format!("fbm1.{key}"), name: name.into() };
+        c.rows = vec![row("a", "DeepSeek V4.1 Flash Fast 10/17"), row("b", "DeepSeek V4.1 Flash 10/17")];
+        assert_eq!(find_row(&c, "deepseek-v4.1-flash").unwrap().key, "b");
         assert!(parse_catalog(&json!({"issuedAt": 1, "refreshAt": 2, "rows": []}), Instant::now()).is_none());
     }
 

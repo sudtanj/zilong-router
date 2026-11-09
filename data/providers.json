@@ -1,8 +1,8 @@
 {
  "meta": {
-  "upstreamVersion": "0.5.112",
-  "upstreamCommit": "1fe586bb1cf35e1ed0cb2150a8ef7d1db040b21d",
-  "generatedAt": "2026-11-02"
+  "upstreamVersion": "0.5.116",
+  "upstreamCommit": "1339107e624d1ab150c6a0c2c2ee22caa7e9db2f",
+  "generatedAt": "2026-11-09"
  },
  "providers": [
   {
@@ -23,6 +23,7 @@
     "icon": "auto_awesome",
     "website": "https://agnes-ai.com",
     "apiKeyUrl": "https://platform.agnes-ai.com",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -70,6 +71,7 @@
     "icon": "cloud",
     "website": "https://bailian.console.aliyun.com",
     "apiKeyUrl": "https://bailian.console.aliyun.com/?apiKey=1",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -136,6 +138,7 @@
     "icon": "cloud",
     "website": "https://www.alibabacloud.com/product/coding",
     "apiKeyUrl": "https://www.alibabacloud.com/product/coding",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -198,6 +201,7 @@
     "icon": "cloud",
     "website": "https://modelstudio.console.alibabacloud.com",
     "apiKeyUrl": "https://modelstudio.console.alibabacloud.com/?apiKey=1",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -260,6 +264,7 @@
     "icon": "cloud",
     "website": "https://www.alibabacloud.com/campaign/ai-landing-page-token",
     "apiKeyUrl": "https://modelstudio.console.alibabacloud.com/?apiKey=1",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -318,6 +323,7 @@
     "icon": "smart_toy",
     "website": "https://console.anthropic.com",
     "apiKeyUrl": "https://console.anthropic.com/settings/keys",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -368,6 +374,7 @@
     "icon": "flight",
     "website": "https://api.airforce",
     "apiKeyUrl": "https://api.airforce",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -421,6 +428,7 @@
     "icon": "record_voice_over",
     "website": "https://assemblyai.com",
     "apiKeyUrl": "https://www.assemblyai.com/app/api-keys",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -453,6 +461,7 @@
     "icon": "flare",
     "website": "https://atria-asi.ai",
     "apiKeyUrl": "https://api.atria-asi.ai/dashboard",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -490,6 +499,7 @@
     "icon": "account_balance",
     "website": "https://b.ai",
     "apiKeyUrl": "https://b.ai",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -526,6 +536,7 @@
     "icon": "search",
     "website": "https://cloud.baidu.com/product/qianfan.html",
     "apiKeyUrl": "https://console.bce.baidu.com/qianfan/ais/console/applicationConsole/application",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -596,6 +607,7 @@
     "icon": "storefront",
     "website": "https://bazaarlink.ai",
     "apiKeyUrl": "https://bazaarlink.ai",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -748,6 +760,7 @@
     "icon": "smart_toy",
     "website": "https://blackbox.ai",
     "apiKeyUrl": "https://www.blackbox.ai/api-management",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -843,6 +856,7 @@
     "icon": "psychology",
     "website": "https://bluesminds.com",
     "apiKeyUrl": "https://bluesminds.com",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -946,6 +960,7 @@
     "icon": "cloud",
     "website": "https://console.byteplus.com/ark",
     "apiKeyUrl": "https://console.byteplus.com/ark/region:ark+ap-southeast-1/apiKey",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -1005,6 +1020,7 @@
     "icon": "memory",
     "website": "https://www.cerebras.ai",
     "apiKeyUrl": "https://cloud.cerebras.ai/platform",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -1065,6 +1081,7 @@
     "icon": "water_drop",
     "website": "https://chutes.ai",
     "apiKeyUrl": "https://chutes.ai/app/api",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -1094,6 +1111,7 @@
     "icon": "smart_toy",
     "website": "https://claude.ai",
     "apiKeyUrl": "https://claude.ai",
+    "authHint": null,
     "deprecated": true,
     "deprecationNotice": "⚠️ Risk Notice: This provider uses a subscription/OAuth session not officially licensed for proxy/router use. Account may be restricted or banned. Use at your own risk."
    },
@@ -1207,6 +1225,7 @@
     "icon": "smart_toy",
     "website": "https://cline.bot",
     "apiKeyUrl": "https://cline.bot",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -1295,6 +1314,7 @@
     "icon": "vpn_key",
     "website": "https://cline.bot",
     "apiKeyUrl": "https://app.cline.bot",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -1398,6 +1418,7 @@
     "icon": "cloud",
     "website": "https://developers.cloudflare.com/workers-ai/",
     "apiKeyUrl": "https://dash.cloudflare.com/profile/api-tokens",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -1466,48 +1487,6 @@
    "thinkingConfig": null
   },
   {
-   "id": "freebuff",
-   "alias": "fb",
-   "aliases": [],
-   "category": "oauth",
-   "authType": "oauth",
-   "authModes": null,
-   "noAuth": false,
-   "priority": 45,
-   "display": {
-    "name": "Freebuff",
-    "color": "#16A34A",
-    "textIcon": "FB",
-    "icon": "terminal",
-    "website": "https://freebuff.com",
-    "apiKeyUrl": "https://freebuff.com",
-    "deprecated": true,
-    "deprecationNotice": "⚠️ Risk Notice: This provider uses a Freebuff account session that its terms do not license for proxy/router use. Account may be restricted or banned. Use at your own risk."
-   },
-   "transport": {
-    "baseUrl": "https://www.codebuff.com/api/v1/chat/completions",
-    "format": "openai",
-    "forceStream": true,
-    "headers": {}
-   },
-   "transports": null,
-   "oauth": null,
-   "models": [
-    {
-     "id": "glm-5.3-flash",
-     "name": "GLM 5.3 Flash"
-    },
-    {
-     "id": "deepseek-v4.1-flash",
-     "name": "DeepSeek V4.1 Flash"
-    },
-    {
-     "id": "mimo-v2.6-flash",
-     "name": "MiMo V2.6 Flash"
-    }
-   ]
-  },
-  {
    "id": "codex",
    "alias": "cx",
    "aliases": [],
@@ -1522,6 +1501,7 @@
     "icon": "code",
     "website": "https://chatgpt.com/codex",
     "apiKeyUrl": "https://chatgpt.com/codex",
+    "authHint": null,
     "deprecated": true,
     "deprecationNotice": "⚠️ Risk Notice: This provider uses a subscription/OAuth session not officially licensed for proxy/router use. Account may be restricted or banned. Use at your own risk."
    },
@@ -1535,19 +1515,60 @@
      "User-Agent": "codex_cli_rs/0.159.0",
      "version": "0.159.0"
     },
+    "usage": {
+     "url": "https://chatgpt.com/backend-api/wham/usage",
+     "resetCreditsUrl": "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits",
+     "resetCreditsConsumeUrl": "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume"
+    },
     "clientId": "app_EMoamEEZ73f0CkXaXp7hrann",
     "tokenUrl": "https://auth.openai.com/oauth/token"
    },
    "transports": null,
-   "oauth": null,
+   "oauth": {
+    "clientId": "app_EMoamEEZ73f0CkXaXp7hrann",
+    "authorizeUrl": "https://auth.openai.com/oauth/authorize",
+    "tokenUrl": "https://auth.openai.com/oauth/token",
+    "scope": "openid profile email offline_access",
+    "codeChallengeMethod": "S256",
+    "fixedPort": 1455,
+    "callbackPath": "/auth/callback",
+    "extraParams": {
+     "id_token_add_organizations": "true",
+     "codex_cli_simplified_flow": "true",
+     "originator": "codex_cli_rs"
+    },
+    "refreshLeadMs": 600000,
+    "refresh": {
+     "encoding": "form",
+     "scope": "openid profile email offline_access"
+    },
+    "maxRefreshAgeMs": 691200000,
+    "trackRefreshAt": true
+   },
    "models": [
     {
      "id": "gpt-6.1-sol",
-     "name": "GPT 6.1 Sol"
+     "name": "GPT 6.1 Sol",
+     "responsesLite": true,
+     "thinkingLevels": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+     ]
     },
     {
      "id": "gpt-6.1-terra",
-     "name": "GPT 6.1 Terra"
+     "name": "GPT 6.1 Terra",
+     "responsesLite": true,
+     "thinkingLevels": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+     ]
     },
     {
      "id": "gpt-6-astra",
@@ -1560,21 +1581,53 @@
     },
     {
      "id": "gpt-6-sol",
-     "name": "GPT 6.0 Sol"
+     "name": "GPT 6.0 Sol",
+     "responsesLite": true,
+     "thinkingLevels": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+     ]
     },
     {
      "id": "gpt-6-sol[1m]",
      "name": "GPT 6.0 Sol (extended context)",
-     "upstreamModelId": "gpt-6-sol"
+     "upstreamModelId": "gpt-6-sol",
+     "responsesLite": true,
+     "thinkingLevels": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+     ]
     },
     {
      "id": "gpt-6-luna",
-     "name": "GPT 6.0 Luna"
+     "name": "GPT 6.0 Luna",
+     "responsesLite": true,
+     "thinkingLevels": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+     ]
     },
     {
      "id": "gpt-6-luna[1m]",
      "name": "GPT 6.0 Luna (extended context)",
-     "upstreamModelId": "gpt-6-luna"
+     "upstreamModelId": "gpt-6-luna",
+     "responsesLite": true,
+     "thinkingLevels": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+     ]
     },
     {
      "id": "gpt-5.6-sol",
@@ -1588,7 +1641,8 @@
     {
      "id": "gpt-5.6-sol-review",
      "name": "GPT 5.6 Sol Review",
-     "upstreamModelId": "gpt-5.6-sol"
+     "upstreamModelId": "gpt-5.6-sol",
+     "quotaFamily": "review"
     },
     {
      "id": "gpt-5.6-terra",
@@ -1602,7 +1656,8 @@
     {
      "id": "gpt-5.6-terra-review",
      "name": "GPT 5.6 Terra Review",
-     "upstreamModelId": "gpt-5.6-terra"
+     "upstreamModelId": "gpt-5.6-terra",
+     "quotaFamily": "review"
     },
     {
      "id": "gpt-5.6-luna",
@@ -1616,7 +1671,8 @@
     {
      "id": "gpt-5.6-luna-review",
      "name": "GPT 5.6 Luna Review",
-     "upstreamModelId": "gpt-5.6-luna"
+     "upstreamModelId": "gpt-5.6-luna",
+     "quotaFamily": "review"
     },
     {
      "id": "gpt-daybreak-blue-latest",
@@ -1629,7 +1685,8 @@
     {
      "id": "codex-auto-review",
      "name": "Codex Auto Review",
-     "upstreamModelId": "codex-auto-review"
+     "upstreamModelId": "codex-auto-review",
+     "quotaFamily": "review"
     }
    ],
    "passthroughModels": false,
@@ -1660,6 +1717,7 @@
     "icon": "hub",
     "website": "https://cohere.com",
     "apiKeyUrl": "https://dashboard.cohere.com/api-keys",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -1705,6 +1763,7 @@
     "icon": "hub",
     "website": "https://dahl.global",
     "apiKeyUrl": "https://dahl.global/dashboard",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -1750,6 +1809,7 @@
     "icon": "mic",
     "website": "https://deepgram.com",
     "apiKeyUrl": "https://console.deepgram.com/api-keys",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -1781,6 +1841,7 @@
     "icon": "bolt",
     "website": "https://deepseek.com",
     "apiKeyUrl": "https://platform.deepseek.com/api_keys",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -1978,6 +2039,7 @@
     "icon": "flutter_dash",
     "website": "https://featherless.ai",
     "apiKeyUrl": "https://featherless.ai/account/api-keys",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -2037,6 +2099,7 @@
     "icon": "local_fire_department",
     "website": "https://fireworks.ai",
     "apiKeyUrl": "https://fireworks.ai/account/api-keys",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -2079,6 +2142,7 @@
     "icon": "code",
     "website": "https://github.com/features/copilot",
     "apiKeyUrl": "https://github.com/features/copilot",
+    "authHint": null,
     "deprecated": true,
     "deprecationNotice": "⚠️ Risk Notice: This provider uses a subscription/OAuth session not officially licensed for proxy/router use. Account may be restricted or banned. Use at your own risk."
    },
@@ -2261,6 +2325,7 @@
     "icon": "code",
     "website": "https://open.bigmodel.cn",
     "apiKeyUrl": "https://open.bigmodel.cn/usercenter/apikeys",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -2367,6 +2432,7 @@
     "icon": "code",
     "website": "https://open.bigmodel.cn",
     "apiKeyUrl": "https://open.bigmodel.cn/usercenter/apikeys",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -2441,6 +2507,7 @@
     "icon": "speed",
     "website": "https://groq.com",
     "apiKeyUrl": "https://console.groq.com/keys",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -2493,6 +2560,7 @@
     "icon": "bolt",
     "website": "https://hyperbolic.xyz",
     "apiKeyUrl": "https://app.hyperbolic.xyz/settings",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -2561,6 +2629,7 @@
     "icon": "login",
     "website": "https://kilo.ai",
     "apiKeyUrl": "https://kilo.ai/dashboard?tab=apiKeys",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -2622,6 +2691,7 @@
     "icon": "code",
     "website": "https://kilocode.ai",
     "apiKeyUrl": "https://kilocode.ai",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -2703,6 +2773,7 @@
     "icon": "psychology",
     "website": "https://kimi.moonshot.cn",
     "apiKeyUrl": "https://platform.moonshot.ai/console/api-keys",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -2842,6 +2913,7 @@
     "icon": "pool",
     "website": "https://llm7.io",
     "apiKeyUrl": "https://llm7.io",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -2897,6 +2969,7 @@
     "textIcon": "MF",
     "icon": "smart_toy",
     "apiKeyUrl": null,
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -2932,6 +3005,7 @@
     "icon": "memory",
     "website": "https://www.minimaxi.com",
     "apiKeyUrl": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -3026,6 +3100,7 @@
     "icon": "memory",
     "website": "https://www.minimaxi.com",
     "apiKeyUrl": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -3122,6 +3197,7 @@
     "icon": "smart_toy",
     "website": "https://agent.minimax.cn",
     "apiKeyUrl": null,
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -3193,6 +3269,7 @@
     "icon": "smart_toy",
     "website": "https://agent.minimax.io",
     "apiKeyUrl": null,
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -3262,6 +3339,7 @@
     "icon": "air",
     "website": "https://mistral.ai",
     "apiKeyUrl": "https://console.mistral.ai/api-keys",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -3307,6 +3385,7 @@
     "textIcon": "MF",
     "icon": "hub",
     "apiKeyUrl": null,
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -3346,6 +3425,7 @@
     "icon": "change_history",
     "website": "https://morphllm.com",
     "apiKeyUrl": "https://morphllm.com",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -3413,6 +3493,7 @@
     "icon": "auto_awesome",
     "website": "https://muse.ai",
     "apiKeyUrl": "https://dev.meta.ai",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -3527,6 +3608,7 @@
     "icon": "extension",
     "website": "https://nanobananaapi.ai",
     "apiKeyUrl": "https://nanobananaapi.ai/dashboard",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -3557,6 +3639,7 @@
     "icon": "cloud",
     "website": "https://nebius.com",
     "apiKeyUrl": "https://studio.nebius.com/settings/api-keys",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -3599,6 +3682,7 @@
     "icon": "psychology",
     "website": "https://nousresearch.com",
     "apiKeyUrl": "https://portal.nousresearch.com/api-keys",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -3693,6 +3777,7 @@
     "icon": "developer_board",
     "website": "https://developer.nvidia.com/nim",
     "apiKeyUrl": "https://build.nvidia.com/settings/api-keys",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -3752,6 +3837,7 @@
     "icon": "auto_awesome",
     "website": "https://platform.openai.com",
     "apiKeyUrl": "https://platform.openai.com/api-keys",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -3875,6 +3961,7 @@
     "textIcon": "OC",
     "icon": "terminal",
     "apiKeyUrl": null,
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -3936,6 +4023,7 @@
     "icon": "router",
     "website": "https://openrouter.ai",
     "apiKeyUrl": "https://openrouter.ai/settings/keys",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -3972,6 +4060,7 @@
     "icon": "search",
     "website": "https://www.perplexity.ai",
     "apiKeyUrl": "https://www.perplexity.ai/settings/api",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -4015,6 +4104,7 @@
     "icon": "water_drop",
     "website": "https://poolside.ai",
     "apiKeyUrl": "https://platform.poolside.ai/api-keys",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -4056,6 +4146,7 @@
     "icon": "terminal",
     "website": "https://www.runcrate.ai/inference/free?utm_source=9router&utm_medium=directory&utm_campaign=gpu_pricing",
     "apiKeyUrl": "https://www.runcrate.ai/dashboard/api-keys",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -4115,6 +4206,7 @@
     "icon": "memory",
     "website": "https://sambanova.ai",
     "apiKeyUrl": "https://cloud.sambanova.ai/apis",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -4151,6 +4243,7 @@
     "icon": "auto_awesome",
     "website": "https://token.sensenova.cn",
     "apiKeyUrl": "https://token.sensenova.cn",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -4163,16 +4256,24 @@
    "oauth": null,
    "models": [
     {
+     "id": "sensenova-6.8-flash",
+     "name": "SenseNova 6.8 Flash"
+    },
+    {
      "id": "sensenova-6.8-flash-lite",
      "name": "SenseNova 6.8 Flash Lite"
+    },
+    {
+     "id": "deepseek-flash",
+     "name": "DeepSeek V4.1 Flash"
     },
     {
      "id": "deepseek-v4-flash",
      "name": "DeepSeek V4 Flash"
     },
     {
-     "id": "deepseek-flash",
-     "name": "DeepSeek V4.1 Flash"
+     "id": "glm-5.3",
+     "name": "GLM-5.3"
     },
     {
      "id": "glm-5.2",
@@ -4211,6 +4312,7 @@
     "icon": "cloud_queue",
     "website": "https://cloud.siliconflow.com",
     "apiKeyUrl": "https://cloud.siliconflow.com/account/ak",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -4312,6 +4414,7 @@
     "icon": "cloud",
     "website": "https://cloud.tencent.com/product/hunyuan",
     "apiKeyUrl": "https://console.cloud.tencent.com/hunyuan/api-key",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -4353,6 +4456,7 @@
     "icon": "group_work",
     "website": "https://www.together.ai",
     "apiKeyUrl": "https://api.together.xyz/settings/api-keys",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -4403,6 +4507,7 @@
     "icon": "anchor",
     "website": "https://tokenharbor.ai",
     "apiKeyUrl": "https://tokenharbor.ai/dashboard",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -4463,6 +4568,7 @@
     "icon": "hub",
     "website": "https://www.tokenrouter.com",
     "apiKeyUrl": "https://www.tokenrouter.com",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -4594,6 +4700,7 @@
     "icon": "shield",
     "website": "https://venice.ai",
     "apiKeyUrl": "https://venice.ai/settings/api",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -4664,6 +4771,7 @@
     "icon": "deployed_code",
     "website": "https://vercel.com/ai-gateway",
     "apiKeyUrl": "https://vercel.com/dashboard/~/ai-gateway",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -4702,6 +4810,7 @@
     "icon": "cloud",
     "website": "https://ark.cn-beijing.volces.com",
     "apiKeyUrl": "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },
@@ -4772,6 +4881,7 @@
     "icon": "auto_awesome",
     "website": "https://x.ai",
     "apiKeyUrl": "https://console.x.ai",
+    "authHint": null,
     "deprecated": false,
     "deprecationNotice": null
    },

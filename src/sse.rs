@@ -114,6 +114,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn keepalive_comments_are_not_events() {
+        let mut p = Parser::default();
+        let evs = p.push(b": keepalive\n\ndata: x\n\n");
+        assert_eq!(evs.len(), 1);
+        assert_eq!(evs[0].data, "x");
+    }
+
+    #[test]
     fn roundtrip_and_split_chunks() {
         let mut p = Parser::default();
         assert!(p.push(b"event: message_start\ndata: {\"a\":").is_empty());

@@ -215,18 +215,24 @@ pub async fn send(
         }
     }
     let payload = serde_json::to_vec(body).map_err(|e| ExecError::Network(e.to_string()))?;
-    let timeout = Duration::from_millis(transport.timeout_ms.unwrap_or(state.cfg.connect_timeout_ms));
+    // Time allowed for response headers. Reasoning models can think for minutes before the first
+    // byte, so this follows the stall timeout rather than the (short) connect timeout.
+    let timeout = Duration::from_millis(transport.timeout_ms.unwrap_or(state.cfg.stall_timeout_ms));
 
     let mut attempt: u32 = 0;
     loop {
-        let req = state.http.post(&url).headers(hm.clone()).body(payload.clone()).timeout(timeout);
-        // `.timeout` here bounds the whole request for non-streaming calls; for streams
-        // reqwest applies it until the response headers arrive, after which the body is
-        // read without this deadline (stall detection happens in the handler).
-        let result = req.send().await;
+        // No reqwest `.timeout()`: it also covers the response body, which would cut every stream
+        // longer than the limit. Headers are bounded here; the body by the stream pump.
+        let req = state.http.post(&url).headers(hm.clone()).body(payload.clone());
+        let result = tokio::time::timeout(timeout, req.send()).await;
+        let timed_out = match &result {
+            Err(_) => true,
+            Ok(Err(e)) => e.is_timeout(),
+            Ok(Ok(_)) => false,
+        };
         let (status, retry_delay, body_text) = match result {
-            Ok(resp) if resp.status().is_success() => return Ok(resp),
-            Ok(resp) => {
+            Ok(Ok(resp)) if resp.status().is_success() => return Ok(resp),
+            Ok(Ok(resp)) => {
                 let status = resp.status().as_u16();
                 let retry_after = resp
                     .headers()
@@ -237,7 +243,8 @@ pub async fn send(
                 let text = resp.text().await.unwrap_or_default();
                 (status, retry_after, text)
             }
-            Err(e) => {
+            Err(_) => (502, None, format!("timeout error: no response headers within {}s", timeout.as_secs())),
+            Ok(Err(e)) => {
                 let kind = if e.is_timeout() {
                     "timeout"
                 } else if e.is_connect() {
@@ -248,7 +255,8 @@ pub async fn send(
                 (502, None, format!("{kind} error: {e}"))
             }
         };
-        let (max_attempts, delay_ms) = retry_policy(transport, status);
+        // A timeout already cost the full wait; the caller's fallback is the better next step.
+        let (max_attempts, delay_ms) = if timed_out { (0, 0) } else { retry_policy(transport, status) };
         if attempt < max_attempts {
             attempt += 1;
             let wait = retry_delay.unwrap_or(delay_ms).min(30_000);

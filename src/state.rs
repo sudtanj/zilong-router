@@ -47,9 +47,9 @@ impl AppState {
 
         let mut http = reqwest::Client::builder()
             .connect_timeout(Duration::from_millis(cfg.connect_timeout_ms))
-            // No overall timeout: streams can legitimately run for minutes. Stall
-            // detection lives in the stream pump instead.
-            .pool_idle_timeout(Duration::from_secs(90))
+            // No overall timeout: streams can legitimately run for minutes. Stall detection lives in
+            // the stream pump.
+            .pool_idle_timeout(Duration::from_secs(30))
             .pool_max_idle_per_host(4)
             .tcp_keepalive(Duration::from_secs(60))
             .user_agent(concat!("zilong-router/", env!("CARGO_PKG_VERSION")))

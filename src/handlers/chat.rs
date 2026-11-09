@@ -784,6 +784,9 @@ fn synthesize_events(v: &Value, fmt: Format) -> Vec<sse::Event> {
     }
 }
 
+/// Silence on a stream before a comment line is sent to the client.
+const KEEPALIVE: Duration = Duration::from_secs(15);
+
 fn sse_headers(b: axum::http::response::Builder) -> axum::http::response::Builder {
     b.header(header::CONTENT_TYPE, "text/event-stream")
         .header(header::CACHE_CONTROL, "no-cache")
@@ -803,9 +806,29 @@ fn stream_response(ctx: ReqCtx, resp: reqwest::Response) -> Response {
         let mut ttft: Option<u128> = None;
         let mut status = "200 OK";
         let mut client_gone = false;
+        let mut idle = Instant::now();
 
         loop {
-            let next = tokio::time::timeout(stall, upstream.next()).await;
+            let next = loop {
+                let left = stall.saturating_sub(idle.elapsed());
+                match tokio::time::timeout(left.min(KEEPALIVE), upstream.next()).await {
+                    Ok(r) => break Ok(r),
+                    Err(_) if left > KEEPALIVE => {
+                        // SSE comment: keeps clients and proxies from dropping a silent connection.
+                        if tx.send(Ok(Bytes::from_static(b": keepalive\n\n"))).await.is_err() {
+                            client_gone = true;
+                            break Err(());
+                        }
+                    }
+                    Err(_) => break Err(()),
+                }
+            };
+            if client_gone {
+                tracing::info!("{}/{} client disconnected while waiting", ctx.provider, ctx.model);
+                status = "499 client closed";
+                break;
+            }
+            idle = Instant::now();
             let chunk = match next {
                 Ok(Some(Ok(c))) => c,
                 Ok(Some(Err(e))) => {

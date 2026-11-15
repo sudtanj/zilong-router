@@ -544,7 +544,10 @@ mod tests {
         let mut t = StreamTranslator::new(Format::Openai, Format::Claude, "m");
         let out = feed_all(
             &mut t,
-            &[("", json!({"id": "chatcmpl-abcdefgh", "error": null, "choices": [{"index": 0, "delta": {"content": "hi"}}]}))],
+            &[(
+                "",
+                json!({"id": "chatcmpl-abcdefgh", "error": null, "choices": [{"index": 0, "delta": {"content": "hi"}}]}),
+            )],
         );
         assert!(out.iter().all(|e| e.event.as_deref() != Some("error")));
         assert!(out.iter().any(|e| e.event.as_deref() == Some("content_block_delta")));
@@ -558,7 +561,10 @@ mod tests {
             &[
                 oai_tool_chunk(json!({"id": "a", "function": {"name": "f", "arguments": "{\"x\":1}"}})),
                 oai_tool_chunk(json!({"id": "b", "function": {"name": "g", "arguments": "{\"y\":2}"}})),
-                ("", json!({"id": "chatcmpl-abcdefgh", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})),
+                (
+                    "",
+                    json!({"id": "chatcmpl-abcdefgh", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}),
+                ),
             ],
         );
         let starts = out.iter().filter(|e| e.event.as_deref() == Some("content_block_start")).count();

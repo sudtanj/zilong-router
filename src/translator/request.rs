@@ -678,7 +678,9 @@ mod tests {
         assert_eq!(ok["thinking"]["budget_tokens"], 2_976);
         let tools = json!([{"type": "function", "function": {"name": "f", "parameters": {"type": "object"}}}]);
         let forced = openai_to_claude(
-            &user_req(json!({"reasoning_effort": "high", "tools": tools, "tool_choice": "required", "temperature": 0.5})),
+            &user_req(
+                json!({"reasoning_effort": "high", "tools": tools, "tool_choice": "required", "temperature": 0.5}),
+            ),
             "claude-x",
         );
         assert!(forced.get("thinking").is_none());

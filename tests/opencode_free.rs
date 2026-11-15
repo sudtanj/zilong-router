@@ -25,6 +25,8 @@ struct Mock {
     live: Option<Vec<&'static str>>,
     /// Models the chat endpoint answers 404 for.
     broken: Vec<&'static str>,
+    /// Models the chat endpoint answers 200 SSE for, with an error as the first event.
+    stream_error: Vec<&'static str>,
     model_requests: Arc<Mutex<Vec<HeaderMap>>>,
     chats: Arc<Mutex<Vec<(HeaderMap, Value)>>>,
 }
@@ -46,6 +48,10 @@ async fn chat(State(m): State<Mock>, headers: HeaderMap, body: axum::body::Bytes
     m.chats.lock().unwrap().push((headers, body));
     if m.broken.contains(&model.as_str()) {
         return (StatusCode::NOT_FOUND, Json(json!({"error": {"message": "model not found"}}))).into_response();
+    }
+    if m.stream_error.contains(&model.as_str()) {
+        let err = json!({"error": {"message": "provider does not support this model: invalid"}});
+        return ([(header::CONTENT_TYPE, "text/event-stream")], format!(": ok\n\ndata: {err}\n\n")).into_response();
     }
     let chunk = |choices: Value, usage: Value| {
         let mut c = json!({"id": "chatcmpl-mock", "object": "chat.completion.chunk", "created": 0, "model": model, "choices": choices});
@@ -357,4 +363,28 @@ async fn skills_index_is_added_to_chat_requests_when_switched_on() {
     assert!(with.contains("- haiku-writer: Write haiku about code") && with.contains("load_skill"), "{with}");
     assert_eq!(chats[1].1["messages"][0]["role"], "system", "{with}");
     assert!(!messages(2).contains("haiku-writer"), "{}", messages(2));
+}
+
+#[tokio::test]
+async fn auto_falls_back_when_a_200_stream_starts_with_an_error() {
+    let mock = Mock { live: Some(vec!["big-pickle"]), stream_error: vec!["exo-free"], ..Default::default() };
+    let router = start_router("stream-error", &start_mock(mock.clone()).await).await;
+    let text = reqwest::Client::new()
+        .post(format!("{}/v1/chat/completions", router.base))
+        .json(&json!({
+            "model": "auto",
+            "models": ["oc/exo-free", "oc/beam-free"],
+            "stream": true,
+            "messages": [{"role": "user", "content": "ping"}]
+        }))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(text.contains("pong") && !text.contains("invalid"), "{text}");
+    let models: Vec<String> =
+        mock.chats.lock().unwrap().iter().map(|(_, b)| b["model"].as_str().unwrap().to_string()).collect();
+    assert_eq!(models, ["exo-free", "beam-free"]);
 }

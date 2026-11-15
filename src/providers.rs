@@ -148,24 +148,23 @@ impl Provider {
         self.display.as_ref().map(|d| d.name.as_str()).unwrap_or(&self.id)
     }
 
-    /// Transport to use for a request whose client speaks `source`. Prefers a
-    /// same-format endpoint from `transports`, then the model's declared format,
-    /// then the default transport.
+    /// Transport to use for a request whose client speaks `source`. A model's declared
+    /// format wins, and yields `None` when no supported endpoint speaks it. Otherwise
+    /// prefers a same-format endpoint from `transports`, then the default transport.
     pub fn transport_for(&self, source: Format, model: &str) -> Option<&Transport> {
         if let Some(t) = crate::oauth::hooks::transport_for(self, model) {
             return Some(t);
         }
+        let default = self.transport.as_ref()?;
+        if let Some(target) = self.model(model).and_then(|m| m.target_format) {
+            if !target.supported() {
+                return None;
+            }
+            return self.transports.iter().flatten().chain([default]).find(|t| t.format == target);
+        }
         if let Some(list) = &self.transports {
             if let Some(t) = list.iter().find(|t| t.format == source && t.format.supported()) {
                 return Some(t);
-            }
-        }
-        let default = self.transport.as_ref()?;
-        if let Some(target) = self.model(model).and_then(|m| m.target_format) {
-            if let Some(list) = &self.transports {
-                if let Some(t) = list.iter().find(|t| t.format == target) {
-                    return Some(t);
-                }
             }
         }
         Some(default)
@@ -351,6 +350,7 @@ mod tests {
         assert_eq!(ds.transport_for(Format::Claude, "deepseek-chat").unwrap().format, Format::Claude);
         assert_eq!(ds.upstream_model_id("deepseek-v4-pro-max"), "deepseek-v4-pro");
         assert!(r.get(OPENAI_COMPATIBLE).unwrap().passthrough_models);
+        assert!(r.get("muse").unwrap().transport_for(Format::Openai, "muse-spark-1.1").is_none());
     }
 
     #[test]

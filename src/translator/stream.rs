@@ -43,8 +43,8 @@ struct O2C {
     next_block: usize,
     text_block: Option<usize>,
     thinking_block: Option<usize>,
-    /// openai tool index -> (claude block index, buffered arguments)
-    tools: Vec<(usize, usize, String)>,
+    /// (openai tool index, claude block index, buffered arguments, upstream tool id or empty)
+    tools: Vec<(usize, usize, String, String)>,
     finish_reason: Option<String>,
     sent_stop: bool,
 }
@@ -265,7 +265,7 @@ fn close_block(which: &mut Option<usize>, out: &mut Vec<Event>) {
 /// OpenAI chunks -> Claude SSE.
 fn o2c(st: &mut O2C, v: &Value, model: &str, usage: &TokenCounts) -> Vec<Event> {
     let mut out = Vec::new();
-    if let Some(err) = v.get("error") {
+    if let Some(err) = v.get("error").filter(|e| !e.is_null()) {
         let msg = err.get("message").and_then(Value::as_str).unwrap_or("upstream error");
         out.push(claude_ev("error", json!({"error": {"type": "api_error", "message": msg}})));
         st.sent_stop = true;
@@ -331,8 +331,21 @@ fn o2c(st: &mut O2C, v: &Value, model: &str, usage: &TokenCounts) -> Vec<Event> 
     }
     if let Some(calls) = delta.get("tool_calls").and_then(Value::as_array) {
         for tc in calls {
-            let ti = tc.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
-            let pos = st.tools.iter().position(|t| t.0 == ti);
+            let index = tc.get("index").and_then(Value::as_u64).map(|i| i as usize);
+            let call_id = tc.get("id").and_then(Value::as_str).filter(|s| !s.is_empty());
+            // Without an index, continue the latest call unless a new id starts another.
+            let mut pos = match index {
+                Some(i) => st.tools.iter().position(|t| t.0 == i),
+                None => st.tools.len().checked_sub(1),
+            };
+            if let (Some(p), Some(id)) = (pos, call_id) {
+                if !st.tools[p].3.is_empty() && st.tools[p].3 != id {
+                    pos = None;
+                }
+            }
+            let ti = index
+                .filter(|i| !st.tools.iter().any(|t| t.0 == *i))
+                .unwrap_or_else(|| st.tools.iter().map(|t| t.0 + 1).max().unwrap_or(0));
             let args = tc.pointer("/function/arguments").and_then(Value::as_str).unwrap_or("");
             match pos {
                 Some(p) => st.tools[p].2.push_str(args),
@@ -345,9 +358,7 @@ fn o2c(st: &mut O2C, v: &Value, model: &str, usage: &TokenCounts) -> Vec<Event> 
                     st.text_block = tb;
                     let i = st.next_block;
                     st.next_block += 1;
-                    let id = tc
-                        .get("id")
-                        .and_then(Value::as_str)
+                    let id = call_id
                         .map(str::to_string)
                         .unwrap_or_else(|| format!("toolu_{}", uuid::Uuid::new_v4().simple()));
                     out.push(claude_ev(
@@ -355,7 +366,7 @@ fn o2c(st: &mut O2C, v: &Value, model: &str, usage: &TokenCounts) -> Vec<Event> 
                         json!({"index": i, "content_block": {"type": "tool_use", "id": id,
                             "name": tc.pointer("/function/name").cloned().unwrap_or(json!("")), "input": {}}}),
                     ));
-                    st.tools.push((ti, i, args.to_string()));
+                    st.tools.push((ti, i, args.to_string(), call_id.unwrap_or_default().to_string()));
                 }
             }
         }
@@ -387,7 +398,9 @@ fn close_claude(st: &mut O2C, model: &str, usage: &TokenCounts, finish: &str) ->
     let mut tb = st.text_block;
     close_block(&mut tb, &mut out);
     st.text_block = tb;
-    for (_, block, args) in std::mem::take(&mut st.tools) {
+    // Many OpenAI-compatible upstreams finish tool calls with "stop".
+    let had_tools = !st.tools.is_empty();
+    for (_, block, args, _) in std::mem::take(&mut st.tools) {
         let parsed = match safe_parse_json(&args) {
             Value::Object(o) => Value::Object(o),
             _ => json!({}),
@@ -398,7 +411,6 @@ fn close_claude(st: &mut O2C, model: &str, usage: &TokenCounts, finish: &str) ->
         ));
         out.push(claude_ev("content_block_stop", json!({"index": block})));
     }
-    let had_tools = finish == "tool_calls";
     let reason = if had_tools { "tool_use" } else { finish_to_stop(finish) };
     out.push(claude_ev(
         "message_delta",
@@ -521,5 +533,45 @@ mod tests {
         .unwrap();
         assert_eq!(args["delta"]["partial_json"], "{\"a\":1}");
         assert_eq!(names.iter().filter(|n| **n == "message_stop").count(), 1);
+    }
+
+    fn oai_tool_chunk(tc: Value) -> (&'static str, Value) {
+        ("", json!({"id": "chatcmpl-abcdefgh", "choices": [{"index": 0, "delta": {"tool_calls": [tc]}}]}))
+    }
+
+    #[test]
+    fn openai_stream_null_error_is_ignored() {
+        let mut t = StreamTranslator::new(Format::Openai, Format::Claude, "m");
+        let out = feed_all(
+            &mut t,
+            &[(
+                "",
+                json!({"id": "chatcmpl-abcdefgh", "error": null, "choices": [{"index": 0, "delta": {"content": "hi"}}]}),
+            )],
+        );
+        assert!(out.iter().all(|e| e.event.as_deref() != Some("error")));
+        assert!(out.iter().any(|e| e.event.as_deref() == Some("content_block_delta")));
+    }
+
+    #[test]
+    fn openai_stream_parallel_calls_without_index_and_stop_finish() {
+        let mut t = StreamTranslator::new(Format::Openai, Format::Claude, "m");
+        let out = feed_all(
+            &mut t,
+            &[
+                oai_tool_chunk(json!({"id": "a", "function": {"name": "f", "arguments": "{\"x\":1}"}})),
+                oai_tool_chunk(json!({"id": "b", "function": {"name": "g", "arguments": "{\"y\":2}"}})),
+                (
+                    "",
+                    json!({"id": "chatcmpl-abcdefgh", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}),
+                ),
+            ],
+        );
+        let starts = out.iter().filter(|e| e.event.as_deref() == Some("content_block_start")).count();
+        assert_eq!(starts, 2);
+        let delta: Value =
+            serde_json::from_str(&out.iter().find(|e| e.event.as_deref() == Some("message_delta")).unwrap().data)
+                .unwrap();
+        assert_eq!(delta["delta"]["stop_reason"], "tool_use");
     }
 }

@@ -558,11 +558,7 @@ async fn attempt(
         }
     }
     let (status, m) = last_err.unwrap_or((502, "upstream unreachable".into()));
-    Err(ApiError::new(
-        client_status(status),
-        source,
-        format!("[{}/{}] {m}", provider.id, resolved.model),
-    ))
+    Err(ApiError::new(client_status(status), source, format!("[{}/{}] {m}", provider.id, resolved.model)))
 }
 
 struct ReqCtx {
@@ -1068,7 +1064,6 @@ fn terminal_error(fmt: Format, message: &str) -> Bytes {
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     #[test]
     fn upstream_failures_map_to_client_statuses() {

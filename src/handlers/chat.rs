@@ -91,10 +91,52 @@ pub(super) async fn handle(
     source: Format,
     raw: Bytes,
 ) -> Response {
-    match handle_inner(state, peer, headers, uri, source, raw).await {
-        Ok(r) => r,
-        Err(e) => e.into_response(),
+    #[derive(serde::Deserialize)]
+    struct Probe {
+        stream: Option<bool>,
     }
+    let streaming = serde_json::from_slice::<Probe>(&raw).is_ok_and(|p| p.stream == Some(true));
+    let mut work = Box::pin(handle_inner(state, peer, headers, uri, source, raw));
+    if !streaming {
+        return work.await.unwrap_or_else(IntoResponse::into_response);
+    }
+    // Fast answers (and errors) keep their real status. Past KEEPALIVE the 200 is committed so
+    // the client gets `: keepalive` while upstream headers are pending.
+    // ponytail: after that point an error becomes an SSE error event (status stays 200) and the
+    // `x-zilong-router-model` header of `auto` is lost; fixing that needs the response head
+    // decided by the executor.
+    if let Ok(r) = tokio::time::timeout(KEEPALIVE, &mut work).await {
+        return r.unwrap_or_else(IntoResponse::into_response);
+    }
+    let (tx, rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(32);
+    tokio::spawn(async move {
+        let done = loop {
+            tokio::select! {
+                r = &mut work => break r,
+                _ = tx.closed() => return,
+                _ = tokio::time::sleep(KEEPALIVE) => {
+                    if tx.send(Ok(Bytes::from_static(b": keepalive\n\n"))).await.is_err() {
+                        return;
+                    }
+                }
+            }
+        };
+        match done {
+            Ok(resp) => {
+                let mut body = resp.into_body().into_data_stream();
+                while let Some(chunk) = body.next().await {
+                    let chunk = chunk.map_err(std::io::Error::other);
+                    if tx.send(chunk).await.is_err() {
+                        return;
+                    }
+                }
+            }
+            Err(e) => {
+                let _ = tx.send(Ok(terminal_error(source, &e.message))).await;
+            }
+        }
+    });
+    sse_headers(Response::builder().status(200)).body(Body::from_stream(ReceiverStream::new(rx))).unwrap()
 }
 
 async fn handle_inner(
@@ -144,7 +186,7 @@ async fn handle_inner(
 
     if !auto {
         let resolved = crate::model::resolve(&state.registry, &aliases, &connections, &raw_model);
-        return attempt(&state, &req, &resolved, &raw_model).await;
+        return attempt(&state, &req, &resolved, &raw_model, false).await;
     }
 
     // `auto`: walk every candidate until one answers. Upstream errors only surface
@@ -170,10 +212,16 @@ async fn handle_inner(
 
     let mut last: Option<ApiError> = None;
     let mut failures: Vec<String> = Vec::new();
-    for c in candidates {
+    let budget = Duration::from_millis(state.cfg.stall_timeout_ms);
+    let total = candidates.len();
+    for (i, c) in candidates.into_iter().enumerate() {
+        // Each candidate may wait out its own header timeout; stop before the client waits for all of them.
+        if last.is_some() && started.elapsed() > budget {
+            break;
+        }
         let Some(p) = state.registry.get(&c.provider) else { continue };
         let label = format!("{}/{}", p.id, c.model);
-        match attempt(&state, &req, &c, &label).await {
+        match attempt(&state, &req, &c, &label, i + 1 < total).await {
             Ok(mut resp) => {
                 if let Ok(v) = header::HeaderValue::from_str(&label) {
                     resp.headers_mut().insert("x-zilong-router-model", v);
@@ -253,7 +301,7 @@ pub async fn ping(state: &Arc<AppState>, model: &str) -> Value {
             state.db.kv_scope("modelAliases").map_err(|e| ApiError::new(500, Format::Openai, e.to_string()))?;
         let conns = state.db.all_connections().map_err(|e| ApiError::new(500, Format::Openai, e.to_string()))?;
         let resolved = crate::model::resolve(&state.registry, &aliases, &conns, model);
-        let resp = attempt(state, &req, &resolved, model).await?;
+        let resp = attempt(state, &req, &resolved, model, false).await?;
         let status = resp.status().as_u16();
         let bytes = axum::body::to_bytes(resp.into_body(), 4 << 20)
             .await
@@ -302,6 +350,7 @@ async fn attempt(
     req: &Req<'_>,
     resolved: &crate::model::Resolved,
     raw_model: &str,
+    more_fallbacks: bool,
 ) -> Result<Response, ApiError> {
     let Req { caller, headers, source, body, client_stream, endpoint, started, body_len, .. } = *req;
     let provider = state.registry.get(&resolved.provider).ok_or_else(|| {
@@ -378,7 +427,7 @@ async fn attempt(
                 }
                 Pick::None => {
                     return Err(match last_err {
-                        Some((status, m)) => ApiError::new(if status >= 500 { 502 } else { status }, source, format!("[{}/{}] {m}", provider.id, resolved.model)),
+                        Some((status, m)) => ApiError::new(client_status(status), source, format!("[{}/{}] {m}", provider.id, resolved.model)),
                         None if tried == 0 => ApiError::new(404, source, format!(
                             "No active credentials for provider '{}'. Add one with: zilong-router connection add {} <api-key>",
                             provider.id, provider.id
@@ -390,14 +439,17 @@ async fn attempt(
         };
         tried += 1;
         // Refresh tokens that are about to expire, mint per-request tokens (Copilot, MiMo).
-        let picked_id = picked.id.clone();
+        let before = picked.clone();
         let conn = match crate::oauth::prepare(&state, picked, &upstream_model).await {
             Ok(c) => c,
             Err(e) => {
                 let msg = format!("credentials could not be renewed ({e}); sign in again");
                 tracing::warn!("{}/{}: {msg}", provider.id, resolved.model);
-                exclude.insert(picked_id);
-                last_err = Some((401, msg));
+                let level = before.data.get("backoffLevel").and_then(Value::as_i64).unwrap_or(0);
+                let verdict = Verdict::Fallback { cooldown_ms: 60_000, backoff_level: level };
+                router::mark_unavailable(&state, &before, &resolved.model, 503, &msg, verdict);
+                exclude.insert(before.id);
+                last_err = Some((503, msg));
                 continue;
             }
         };
@@ -408,13 +460,20 @@ async fn attempt(
             None => (&upstream_body, Restore::None),
         };
 
-        let sent =
-            executor::send(&state, provider, transport, &conn, &upstream_model, send_body, &headers, upstream_stream)
-                .await;
+        let sent = executor::send(
+            &state,
+            provider,
+            transport,
+            &conn,
+            &upstream_model,
+            send_body,
+            &headers,
+            upstream_stream,
+            !more_fallbacks,
+        )
+        .await;
         let sent = match sent {
-            Ok(resp) if is_sse(&resp) => {
-                reject_error_stream(resp, Duration::from_millis(state.cfg.stall_timeout_ms)).await
-            }
+            Ok(resp) if is_sse(&resp) => reject_error_stream(resp).await,
             other => other,
         };
         match sent {
@@ -499,11 +558,7 @@ async fn attempt(
         }
     }
     let (status, m) = last_err.unwrap_or((502, "upstream unreachable".into()));
-    Err(ApiError::new(
-        if status >= 500 { 502 } else { status },
-        source,
-        format!("[{}/{}] {m}", provider.id, resolved.model),
-    ))
+    Err(ApiError::new(client_status(status), source, format!("[{}/{}] {m}", provider.id, resolved.model)))
 }
 
 struct ReqCtx {
@@ -552,17 +607,40 @@ fn is_sse(resp: &reqwest::Response) -> bool {
 /// Largest head read while looking for the first event of an upstream stream.
 const PEEK_CAP: usize = 64 * 1024;
 
+/// Longest wait for that first event; after it the stream is committed and keepalives take over.
+const PEEK_WAIT: Duration = Duration::from_secs(10);
+
+/// What the client should see for a failure the upstream reported inside a 200 stream.
+fn error_status(data: &str) -> u16 {
+    let t = data.to_ascii_lowercase();
+    if t.contains("invalid_request") || t.contains("prompt is too long") || t.contains("context_length") {
+        400
+    } else {
+        502
+    }
+}
+
+/// Upstream 401/403 mean our credentials are wrong, not the caller's: do not pass them on, or
+/// clients will tell the user their own key is bad.
+fn client_status(status: u16) -> u16 {
+    if matches!(status, 401 | 403) || status >= 500 {
+        502
+    } else {
+        status
+    }
+}
+
 /// Some providers answer 200 and put the failure in the first SSE event. Look at that
 /// event before committing to the response so the caller can fall back like it does for
 /// an HTTP error; the bytes read are replayed ahead of the rest of the stream.
-async fn reject_error_stream(resp: reqwest::Response, stall: Duration) -> Result<reqwest::Response, ExecError> {
+async fn reject_error_stream(resp: reqwest::Response) -> Result<reqwest::Response, ExecError> {
     let (status, headers) = (resp.status(), resp.headers().clone());
     let mut upstream = resp.bytes_stream();
     let mut parser = sse::Parser::default();
     let mut head = Vec::new();
     while head.len() < PEEK_CAP {
-        let first = match tokio::time::timeout(stall, upstream.next()).await {
-            Err(_) => return Err(ExecError::Network(format!("no stream data within {}s", stall.as_secs()))),
+        let first = match tokio::time::timeout(PEEK_WAIT, upstream.next()).await {
+            Err(_) => break,
             Ok(Some(Err(e))) => return Err(ExecError::Network(e.to_string())),
             Ok(Some(Ok(chunk))) => {
                 head.extend_from_slice(&chunk);
@@ -570,14 +648,14 @@ async fn reject_error_stream(resp: reqwest::Response, stall: Duration) -> Result
             }
             Ok(None) => {
                 if let Some(ev) = parser.finish().filter(is_error_event) {
-                    return Err(ExecError::Status { status: 502, body: ev.data });
+                    return Err(ExecError::Status { status: error_status(&ev.data), body: ev.data });
                 }
                 break;
             }
         };
         if let Some(ev) = first {
             if is_error_event(&ev) {
-                return Err(ExecError::Status { status: 502, body: ev.data });
+                return Err(ExecError::Status { status: error_status(&ev.data), body: ev.data });
             }
             break;
         }
@@ -591,16 +669,25 @@ async fn reject_error_stream(resp: reqwest::Response, stall: Duration) -> Result
 
 fn is_error_event(ev: &sse::Event) -> bool {
     ev.event.as_deref() == Some("error")
-        || serde_json::from_str::<Value>(&ev.data)
-            .is_ok_and(|v| v["type"] == "error" || v.get("error").is_some_and(|e| !e.is_null()))
+        || serde_json::from_str::<Value>(&ev.data).is_ok_and(|v| {
+            v["type"] == "error" || v["type"] == "response.failed" || v.get("error").is_some_and(|e| !e.is_null())
+        })
 }
 
 async fn json_response(ctx: ReqCtx, resp: reqwest::Response, client_stream: bool) -> Result<Response, ApiError> {
     let upstream_sse = is_sse(&resp);
-    let text = resp.text().await.map_err(|e| ApiError::new(502, ctx.source, format!("reading upstream body: {e}")))?;
+    let stall = Duration::from_millis(ctx.state.cfg.stall_timeout_ms);
+    let text = tokio::time::timeout(stall, resp.text())
+        .await
+        .map_err(|_| ApiError::new(502, ctx.source, "reading upstream body: stalled"))?
+        .map_err(|e| ApiError::new(502, ctx.source, format!("reading upstream body: {e}")))?;
     let v: Value = if upstream_sse {
         // Upstream insisted on streaming; collapse it into one JSON document.
-        collapse_sse(&text, ctx.target, ctx.source, &ctx.model, &ctx.decloak, hooks::is_codex(&ctx.provider))
+        let codex = hooks::is_codex(&ctx.provider);
+        collapse_sse(&text, ctx.target, ctx.source, &ctx.model, &ctx.decloak, codex).map_err(|body| {
+            let e = ExecError::Status { status: error_status(&body), body };
+            ApiError::new(e.status(), ctx.source, e.message())
+        })?
     } else {
         let mut v: Value = serde_json::from_str(&text).map_err(|_| {
             ApiError::new(
@@ -633,19 +720,30 @@ async fn json_response(ctx: ReqCtx, resp: reqwest::Response, client_stream: bool
 }
 
 /// Replay a full SSE body through the stream translator and assemble the final JSON.
-fn collapse_sse(text: &str, from: Format, to: Format, model: &str, decloak: &Restore, codex: bool) -> Value {
+/// `Err` carries the data of an upstream error event.
+fn collapse_sse(
+    text: &str,
+    from: Format,
+    to: Format,
+    model: &str,
+    decloak: &Restore,
+    codex: bool,
+) -> Result<Value, String> {
     let mut parser = sse::Parser::default();
     let mut tr = StreamTranslator::new(from, to, model);
     let mut pre = codex.then(|| FromResponses::new(model));
     let mut events = Vec::new();
     for mut ev in parser.push(text.as_bytes()).into_iter().chain(parser.finish()) {
         crate::oauth::hooks::decloak_event(&mut ev, decloak);
+        if is_error_event(&ev) {
+            return Err(ev.data);
+        }
         for e in lift(&mut pre, ev) {
             events.extend(tr.feed(&e));
         }
     }
     events.extend(tr.finish());
-    assemble(&events, to, model, &tr.usage)
+    Ok(assemble(&events, to, model, &tr.usage))
 }
 
 /// Codex answers in Responses events; turn them into chat chunks before the usual
@@ -967,6 +1065,22 @@ fn terminal_error(fmt: Format, message: &str) -> Bytes {
 mod tests {
     use super::*;
 
+    #[test]
+    fn upstream_failures_map_to_client_statuses() {
+        assert_eq!(client_status(401), 502);
+        assert_eq!(client_status(403), 502);
+        assert_eq!(client_status(429), 429);
+        assert_eq!(client_status(504), 502);
+        assert_eq!(error_status(r#"{"error":{"type":"invalid_request_error"}}"#), 400);
+        assert_eq!(error_status(r#"{"error":{"type":"overloaded_error"}}"#), 502);
+    }
+
+    #[test]
+    fn collapse_reports_error_events() {
+        let sse = "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"boom\"}}}\n\n";
+        let r = collapse_sse(sse, Format::Openai, Format::Openai, "m", &Restore::None, false);
+        assert!(r.is_err());
+    }
     #[test]
     fn assemble_openai_from_events() {
         let evs = vec![

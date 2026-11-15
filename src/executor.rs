@@ -215,9 +215,9 @@ pub async fn send(
         }
     }
     let payload = serde_json::to_vec(body).map_err(|e| ExecError::Network(e.to_string()))?;
-    // Time allowed for response headers. Reasoning models can think for minutes before the first
-    // byte, so this follows the stall timeout rather than the (short) connect timeout.
-    let timeout = Duration::from_millis(transport.timeout_ms.unwrap_or(state.cfg.stall_timeout_ms));
+    // Time allowed for response headers; streaming bodies are bounded by the stall timeout instead.
+    let timeout = Duration::from_millis(transport.timeout_ms.unwrap_or(state.cfg.first_byte_timeout_ms));
+    let stall = Duration::from_millis(state.cfg.stall_timeout_ms);
 
     let mut attempt: u32 = 0;
     loop {
@@ -240,7 +240,7 @@ pub async fn send(
                     .and_then(|v| v.to_str().ok())
                     .and_then(|s| s.trim().parse::<u64>().ok())
                     .map(|s| s * 1000);
-                let text = resp.text().await.unwrap_or_default();
+                let text = tokio::time::timeout(stall, resp.text()).await.map_or_else(|_| String::new(), |r| r.unwrap_or_default());
                 (status, retry_after, text)
             }
             Err(_) => (502, None, format!("timeout error: no response headers within {}s", timeout.as_secs())),

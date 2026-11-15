@@ -63,6 +63,11 @@ pub struct Config {
     #[arg(long, env = "FETCH_CONNECT_TIMEOUT_MS", default_value_t = 60_000)]
     pub connect_timeout_ms: u64,
 
+    /// Give up on an upstream that has not sent response headers within this time, so `auto`
+    /// can move to the next model.
+    #[arg(long, env = "FIRST_BYTE_TIMEOUT_MS", default_value_t = 120_000)]
+    pub first_byte_timeout_ms: u64,
+
     /// Abort a stream after this much silence between chunks.
     #[arg(long, env = "STREAM_STALL_TIMEOUT_MS", default_value_t = 360_000)]
     pub stall_timeout_ms: u64,
@@ -120,6 +125,7 @@ struct FileConfig {
     workers: Option<usize>,
     log_level: Option<String>,
     connect_timeout_ms: Option<u64>,
+    first_byte_timeout_ms: Option<u64>,
     stall_timeout_ms: Option<u64>,
     outbound_proxy: Option<String>,
     turso_url: Option<String>,
@@ -153,6 +159,7 @@ impl Config {
             take!(workers);
             take!(log_level);
             take!(connect_timeout_ms);
+            take!(first_byte_timeout_ms);
             take!(stall_timeout_ms);
             if let Some(v) = f.require_api_key {
                 self.require_api_key = self.require_api_key || v;
@@ -214,4 +221,15 @@ fn default_data_dir() -> PathBuf {
         return PathBuf::from(h).join("9router");
     }
     PathBuf::from("./data")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn header_wait_is_shorter_than_stall_wait() {
+        let d = Config::parse_from(["zilong-router"]);
+        assert!(d.first_byte_timeout_ms < d.stall_timeout_ms);
+    }
 }

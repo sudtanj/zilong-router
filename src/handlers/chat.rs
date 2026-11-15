@@ -91,10 +91,53 @@ pub(super) async fn handle(
     source: Format,
     raw: Bytes,
 ) -> Response {
-    match handle_inner(state, peer, headers, uri, source, raw).await {
-        Ok(r) => r,
-        Err(e) => e.into_response(),
+    #[derive(serde::Deserialize)]
+    struct Probe {
+        stream: Option<bool>,
     }
+    let streaming = serde_json::from_slice::<Probe>(&raw).is_ok_and(|p| p.stream == Some(true));
+    let mut work = Box::pin(handle_inner(state, peer, headers, uri, source, raw));
+    if !streaming {
+        return work.await.unwrap_or_else(IntoResponse::into_response);
+    }
+    // Fast answers (and errors) keep their real status. Past KEEPALIVE the 200 is committed so
+    // the client gets `: keepalive` while upstream headers are pending.
+    // ponytail: after that point an error becomes an SSE error event (status stays 200) and the
+    // `x-zilong-router-model` header of `auto` is lost; fixing that needs the response head
+    // decided by the executor.
+    if let Ok(r) = tokio::time::timeout(KEEPALIVE, &mut work).await {
+        return r.unwrap_or_else(IntoResponse::into_response);
+    }
+    let (tx, rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(32);
+    tokio::spawn(async move {
+        let done = loop {
+            tokio::select! {
+                r = &mut work => break r,
+                _ = tx.closed() => return,
+                _ = tokio::time::sleep(KEEPALIVE) => {
+                    if tx.send(Ok(Bytes::from_static(b": keepalive\n\n"))).await.is_err() {
+                        return;
+                    }
+                }
+            }
+        };
+        match done {
+            Ok(resp) => {
+                let mut body = resp.into_body().into_data_stream();
+                while let Some(chunk) = body.next().await {
+                    let chunk = chunk.map_err(std::io::Error::other);
+                    if tx.send(chunk).await.is_err() {
+                        return;
+                    }
+                }
+            }
+            Err(e) => {
+                let _ = tx.send(Ok(terminal_error(source, &e.message))).await;
+            }
+        }
+    });
+    sse_headers(Response::builder().status(200)).body(Body::from_stream(ReceiverStream::new(rx))).unwrap()
+}
 }
 
 async fn handle_inner(
@@ -170,7 +213,12 @@ async fn handle_inner(
 
     let mut last: Option<ApiError> = None;
     let mut failures: Vec<String> = Vec::new();
+    let budget = Duration::from_millis(state.cfg.stall_timeout_ms);
     for c in candidates {
+        // Each candidate may wait out its own header timeout; stop before the client waits for all of them.
+        if last.is_some() && started.elapsed() > budget {
+            break;
+        }
         let Some(p) = state.registry.get(&c.provider) else { continue };
         let label = format!("{}/{}", p.id, c.model);
         match attempt(&state, &req, &c, &label).await {
@@ -597,7 +645,11 @@ fn is_error_event(ev: &sse::Event) -> bool {
 
 async fn json_response(ctx: ReqCtx, resp: reqwest::Response, client_stream: bool) -> Result<Response, ApiError> {
     let upstream_sse = is_sse(&resp);
-    let text = resp.text().await.map_err(|e| ApiError::new(502, ctx.source, format!("reading upstream body: {e}")))?;
+    let stall = Duration::from_millis(ctx.state.cfg.stall_timeout_ms);
+    let text = tokio::time::timeout(stall, resp.text())
+        .await
+        .map_err(|_| ApiError::new(502, ctx.source, "reading upstream body: stalled"))?
+        .map_err(|e| ApiError::new(502, ctx.source, format!("reading upstream body: {e}")))?;
     let v: Value = if upstream_sse {
         // Upstream insisted on streaming; collapse it into one JSON document.
         collapse_sse(&text, ctx.target, ctx.source, &ctx.model, &ctx.decloak, hooks::is_codex(&ctx.provider))

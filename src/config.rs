@@ -59,8 +59,8 @@ pub struct Config {
     #[arg(long, env = "LOG_LEVEL", default_value = "info")]
     pub log_level: String,
 
-    /// Abort an upstream request if headers do not arrive within this time.
-    #[arg(long, env = "FETCH_CONNECT_TIMEOUT_MS", default_value_t = 60_000)]
+    /// Abort an upstream request if the connection is not established within this time.
+    #[arg(long, env = "FETCH_CONNECT_TIMEOUT_MS", default_value_t = 10_000)]
     pub connect_timeout_ms: u64,
 
     /// Give up on an upstream that has not sent response headers within this time, so `auto`

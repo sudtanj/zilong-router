@@ -202,6 +202,7 @@ pub async fn send(
     body: &Value,
     client_headers: &HeaderMap,
     stream: bool,
+    retry: bool,
 ) -> Result<reqwest::Response, ExecError> {
     if provider.id == crate::oauth::deepseek_web::ID {
         return crate::oauth::deepseek_web::send(state, conn, model, body).await;
@@ -257,8 +258,9 @@ pub async fn send(
                 (502, None, format!("{kind} error: {e}"))
             }
         };
-        // A timeout already cost the full wait; the caller's fallback is the better next step.
-        let (max_attempts, delay_ms) = if timed_out { (0, 0) } else { retry_policy(transport, status) };
+        // A timeout already cost the full wait, and with other candidates left the fallback beats
+        // sleeping here.
+        let (max_attempts, delay_ms) = if timed_out || !retry { (0, 0) } else { retry_policy(transport, status) };
         if attempt < max_attempts {
             attempt += 1;
             let wait = retry_delay.unwrap_or(delay_ms).min(30_000);

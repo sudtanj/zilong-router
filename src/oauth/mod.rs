@@ -963,7 +963,15 @@ pub async fn prepare(state: &AppState, conn: ProviderConnection, model: &str) ->
     if !token_based || !needs_refresh(&conn) {
         return Ok(conn);
     }
-    refresh_locked(state, conn, false).await
+    // Refresh starts hours before expiry; if it fails the old token is still good for the request.
+    let still_valid = conn.data.get("expiresAt").and_then(util::secs_until).is_some_and(|left| left > 30);
+    match refresh_locked(state, conn.clone(), false).await {
+        Err(e) if still_valid => {
+            tracing::warn!("{} ({}): refresh failed, using the current token: {e}", conn.provider, conn.label());
+            Ok(conn)
+        }
+        r => r,
+    }
 }
 
 /// After a 401/403: refresh even if the token looks valid. `None` when the account

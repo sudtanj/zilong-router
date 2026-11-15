@@ -408,9 +408,16 @@ async fn attempt(
             None => (&upstream_body, Restore::None),
         };
 
-        match executor::send(&state, provider, transport, &conn, &upstream_model, send_body, &headers, upstream_stream)
-            .await
-        {
+        let sent =
+            executor::send(&state, provider, transport, &conn, &upstream_model, send_body, &headers, upstream_stream)
+                .await;
+        let sent = match sent {
+            Ok(resp) if is_sse(&resp) => {
+                reject_error_stream(resp, Duration::from_millis(state.cfg.stall_timeout_ms)).await
+            }
+            other => other,
+        };
+        match sent {
             Ok(resp) => {
                 router::mark_success(&state, &conn, &resolved.model);
                 tracing::info!(
@@ -540,6 +547,52 @@ fn is_sse(resp: &reqwest::Response) -> bool {
         .and_then(|v| v.to_str().ok())
         .map(|ct| ct.starts_with("text/event-stream"))
         .unwrap_or(false)
+}
+
+/// Largest head read while looking for the first event of an upstream stream.
+const PEEK_CAP: usize = 64 * 1024;
+
+/// Some providers answer 200 and put the failure in the first SSE event. Look at that
+/// event before committing to the response so the caller can fall back like it does for
+/// an HTTP error; the bytes read are replayed ahead of the rest of the stream.
+async fn reject_error_stream(resp: reqwest::Response, stall: Duration) -> Result<reqwest::Response, ExecError> {
+    let (status, headers) = (resp.status(), resp.headers().clone());
+    let mut upstream = resp.bytes_stream();
+    let mut parser = sse::Parser::default();
+    let mut head = Vec::new();
+    while head.len() < PEEK_CAP {
+        let first = match tokio::time::timeout(stall, upstream.next()).await {
+            Err(_) => return Err(ExecError::Network(format!("no stream data within {}s", stall.as_secs()))),
+            Ok(Some(Err(e))) => return Err(ExecError::Network(e.to_string())),
+            Ok(Some(Ok(chunk))) => {
+                head.extend_from_slice(&chunk);
+                parser.push(&chunk).into_iter().next()
+            }
+            Ok(None) => {
+                if let Some(ev) = parser.finish().filter(is_error_event) {
+                    return Err(ExecError::Status { status: 502, body: ev.data });
+                }
+                break;
+            }
+        };
+        if let Some(ev) = first {
+            if is_error_event(&ev) {
+                return Err(ExecError::Status { status: 502, body: ev.data });
+            }
+            break;
+        }
+    }
+    let rest = futures_util::stream::once(async move { Ok::<_, reqwest::Error>(Bytes::from(head)) }).chain(upstream);
+    let mut out = axum::http::Response::new(reqwest::Body::wrap_stream(rest));
+    *out.status_mut() = status;
+    *out.headers_mut() = headers;
+    Ok(out.into())
+}
+
+fn is_error_event(ev: &sse::Event) -> bool {
+    ev.event.as_deref() == Some("error")
+        || serde_json::from_str::<Value>(&ev.data)
+            .is_ok_and(|v| v["type"] == "error" || v.get("error").is_some_and(|e| !e.is_null()))
 }
 
 async fn json_response(ctx: ReqCtx, resp: reqwest::Response, client_stream: bool) -> Result<Response, ApiError> {

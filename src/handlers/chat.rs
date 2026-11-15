@@ -138,7 +138,6 @@ pub(super) async fn handle(
     });
     sse_headers(Response::builder().status(200)).body(Body::from_stream(ReceiverStream::new(rx))).unwrap()
 }
-}
 
 async fn handle_inner(
     state: Arc<AppState>,

@@ -240,7 +240,9 @@ pub async fn send(
                     .and_then(|v| v.to_str().ok())
                     .and_then(|s| s.trim().parse::<u64>().ok())
                     .map(|s| s * 1000);
-                let text = tokio::time::timeout(stall, resp.text()).await.map_or_else(|_| String::new(), |r| r.unwrap_or_default());
+                let text = tokio::time::timeout(stall, resp.text())
+                    .await
+                    .map_or_else(|_| String::new(), |r| r.unwrap_or_default());
                 (status, retry_after, text)
             }
             Err(_) => (502, None, format!("timeout error: no response headers within {}s", timeout.as_secs())),

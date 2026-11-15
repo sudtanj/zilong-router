@@ -102,7 +102,7 @@ pub fn openai_to_claude(v: &Value, model: &str) -> Value {
         "role": "assistant",
         "model": v.get("model").and_then(Value::as_str).unwrap_or(model),
         "content": content,
-        "stop_reason": finish_to_stop(finish),
+        "stop_reason": if had_tools { "tool_use" } else { finish_to_stop(finish) },
         "stop_sequence": Value::Null,
         "usage": claude_usage(&usage),
     })
@@ -146,5 +146,15 @@ mod tests {
         assert_eq!(back["content"][1]["input"]["a"], 1);
         assert_eq!(back["usage"]["input_tokens"], 3);
         assert_eq!(error_body(super::super::Format::Claude, 429, "slow")["error"]["type"], "rate_limit_error");
+    }
+
+    #[test]
+    fn tool_calls_force_tool_use_stop_reason() {
+        let oai = json!({"choices": [{"message": {"role": "assistant", "content": null,
+            "tool_calls": [{"id": "c", "type": "function", "function": {"name": "f", "arguments": "[]"}}]},
+            "finish_reason": "stop"}]});
+        let out = openai_to_claude(&oai, "m");
+        assert_eq!(out["stop_reason"], "tool_use");
+        assert_eq!(out["content"][0]["input"], json!({}));
     }
 }

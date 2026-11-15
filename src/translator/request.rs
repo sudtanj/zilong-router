@@ -7,6 +7,26 @@ use super::{parse_data_uri, safe_parse_json, text_of};
 pub const DEFAULT_MAX_TOKENS: i64 = 64_000;
 pub const DEFAULT_MIN_TOKENS_WITH_TOOLS: i64 = 32_000;
 
+/// Output-token ceiling of older Claude models; larger requests are rejected upstream.
+fn model_max_output(model: &str) -> i64 {
+    let m = model.to_ascii_lowercase();
+    if m.starts_with("claude-opus-4-2025") {
+        32_000
+    } else if m.starts_with("claude-3-5") {
+        8_192
+    } else if m.starts_with("claude-3-") {
+        4_096
+    } else {
+        DEFAULT_MAX_TOKENS
+    }
+}
+
+/// OpenAI o-series and gpt-5 models reject `max_tokens`.
+fn wants_max_completion_tokens(model: &str) -> bool {
+    let m = model.rsplit('/').next().unwrap_or(model).to_ascii_lowercase();
+    m.starts_with("gpt-5") || m.strip_prefix('o').and_then(|r| r.chars().next()).is_some_and(|c| c.is_ascii_digit())
+}
+
 fn s(v: &Value, k: &str) -> Option<String> {
     v.get(k).and_then(Value::as_str).map(str::to_string)
 }
@@ -29,6 +49,7 @@ pub fn openai_to_claude(body: &Value, model: &str) -> Value {
     if has_tools && max_tokens < DEFAULT_MIN_TOKENS_WITH_TOOLS && body.get("max_tokens").is_none() {
         max_tokens = DEFAULT_MIN_TOKENS_WITH_TOOLS;
     }
+    max_tokens = max_tokens.min(model_max_output(model));
     out.insert("max_tokens".into(), json!(max_tokens));
     out.insert("stream".into(), json!(body.get("stream").and_then(Value::as_bool).unwrap_or(false)));
     for k in ["temperature", "top_p", "metadata"] {
@@ -125,7 +146,7 @@ pub fn openai_to_claude(body: &Value, model: &str) -> Value {
                             "type": "tool_use",
                             "id": s(tc, "id").unwrap_or_else(|| format!("toolu_{}", uuid::Uuid::new_v4().simple())),
                             "name": tc.pointer("/function/name").and_then(Value::as_str).unwrap_or(""),
-                            "input": safe_parse_json(args),
+                            "input": match safe_parse_json(args) { Value::Object(o) => Value::Object(o), _ => json!({}) },
                         }));
                     }
                 }
@@ -162,29 +183,21 @@ pub fn openai_to_claude(body: &Value, model: &str) -> Value {
             out.insert("tools".into(), Value::Array(converted));
             if let Some(tc) = body.get("tool_choice") {
                 let choice = match tc {
-                    Value::String(x) if x == "required" => Some(json!({"type": "any"})),
-                    Value::String(x) if x == "none" => None, // handled below by dropping tools
-                    Value::String(_) => Some(json!({"type": "auto"})),
+                    Value::String(x) if x == "required" => json!({"type": "any"}),
+                    Value::String(x) if x == "none" => json!({"type": "none"}),
+                    Value::String(_) => json!({"type": "auto"}),
                     Value::Object(o) => match o.get("function").and_then(|f| f.get("name")).and_then(Value::as_str) {
-                        Some(n) => Some(json!({"type": "tool", "name": n})),
+                        Some(n) => json!({"type": "tool", "name": n}),
                         None if matches!(s(tc, "type").as_deref(), Some("auto" | "any" | "tool" | "none")) => {
-                            Some(tc.clone())
+                            tc.clone()
                         }
-                        None => Some(json!({"type": "auto"})),
+                        None => json!({"type": "auto"}),
                     },
-                    _ => Some(json!({"type": "auto"})),
+                    _ => json!({"type": "auto"}),
                 };
-                match choice {
-                    Some(c) => {
-                        out.insert("tool_choice".into(), c);
-                    }
-                    None => {
-                        // `none`: Anthropic has no equivalent that keeps definitions; drop tools.
-                        out.remove("tools");
-                    }
-                }
+                out.insert("tool_choice".into(), choice);
                 if body.get("parallel_tool_calls") == Some(&Value::Bool(false)) {
-                    if let Some(c) = out.get_mut("tool_choice") {
+                    if let Some(c) = out.get_mut("tool_choice").filter(|c| c["type"] != "none") {
                         c["disable_parallel_tool_use"] = json!(true);
                     }
                 }
@@ -204,12 +217,16 @@ pub fn openai_to_claude(body: &Value, model: &str) -> Value {
             "xhigh" | "max" => 32_000,
             _ => 8_192,
         };
-        if budget > 0 {
+        if budget > 0 && max_tokens > 1024 {
             let budget = budget.min(max_tokens - 1024).max(1024);
             out.insert("thinking".into(), json!({"type": "enabled", "budget_tokens": budget}));
         }
     } else if let Some(th) = body.get("thinking") {
         out.insert("thinking".into(), th.clone());
+    }
+    // Anthropic rejects extended thinking together with a forced tool_choice.
+    if matches!(out.get("tool_choice").and_then(|c| c["type"].as_str()), Some("any" | "tool")) {
+        out.remove("thinking");
     }
     if let Some(Value::Object(th)) = out.get("thinking") {
         // Anthropic rejects temperature/top_p overrides while thinking is on.
@@ -469,6 +486,11 @@ pub fn claude_to_openai(body: &Value, model: &str) -> Value {
     if let Some(e) = body.pointer("/output_config/effort").and_then(Value::as_str) {
         out.insert("reasoning_effort".into(), json!(e));
     }
+    if wants_max_completion_tokens(model) {
+        if let Some(mt) = out.remove("max_tokens") {
+            out.insert("max_completion_tokens".into(), mt);
+        }
+    }
 
     Value::Object(out)
 }
@@ -595,5 +617,71 @@ mod tests {
         fix_missing_tool_responses(&mut msgs);
         assert_eq!(msgs.len(), 4);
         assert_eq!(msgs[2]["tool_call_id"], "b");
+    }
+
+    fn user_req(extra: Value) -> Value {
+        let mut req = json!({"max_tokens": 4000, "messages": [{"role": "user", "content": "hi"}]});
+        req.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        req
+    }
+
+    #[test]
+    fn clamps_max_tokens_to_model_limit() {
+        let no_max = json!({"messages": [{"role": "user", "content": "hi"}]});
+        assert_eq!(openai_to_claude(&no_max, "claude-opus-4-20250514")["max_tokens"], 32_000);
+        assert_eq!(openai_to_claude(&no_max, "claude-3-5-sonnet-20241022")["max_tokens"], 8_192);
+        assert_eq!(openai_to_claude(&no_max, "claude-3-haiku-20240307")["max_tokens"], 4_096);
+        assert_eq!(openai_to_claude(&no_max, "claude-sonnet-4-5")["max_tokens"], 64_000);
+        let big = json!({"max_tokens": 20_000, "messages": [{"role": "user", "content": "hi"}]});
+        assert_eq!(openai_to_claude(&big, "claude-3-5-sonnet-20241022")["max_tokens"], 8_192);
+    }
+
+    #[test]
+    fn max_completion_tokens_for_reasoning_models() {
+        let req = json!({"max_tokens": 50, "messages": [{"role": "user", "content": "hi"}]});
+        for m in ["o3", "o4-mini", "gpt-5", "gpt-5-mini"] {
+            let out = claude_to_openai(&req, m);
+            assert_eq!(out["max_completion_tokens"], 50, "{m}");
+            assert!(out.get("max_tokens").is_none(), "{m}");
+        }
+        for m in ["gpt-4o", "omni-x", "deepseek-chat"] {
+            let out = claude_to_openai(&req, m);
+            assert_eq!(out["max_tokens"], 50, "{m}");
+            assert!(out.get("max_completion_tokens").is_none(), "{m}");
+        }
+    }
+
+    #[test]
+    fn non_object_tool_arguments_become_empty_input() {
+        let req = json!({"messages": [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": null, "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "f", "arguments": "not json"}}]},
+            {"role": "tool", "tool_call_id": "c1", "content": "ok"}
+        ]});
+        let out = openai_to_claude(&req, "claude-x");
+        assert_eq!(out["messages"][1]["content"][0]["input"], json!({}));
+    }
+
+    #[test]
+    fn tool_choice_none_keeps_tool_definitions() {
+        let tools = json!([{"type": "function", "function": {"name": "f", "parameters": {"type": "object"}}}]);
+        let out = openai_to_claude(&user_req(json!({"tools": tools, "tool_choice": "none"})), "claude-x");
+        assert_eq!(out["tools"][0]["name"], "f");
+        assert_eq!(out["tool_choice"]["type"], "none");
+    }
+
+    #[test]
+    fn thinking_needs_room_and_no_forced_tool() {
+        let small = openai_to_claude(&user_req(json!({"max_tokens": 1024, "reasoning_effort": "high"})), "claude-x");
+        assert!(small.get("thinking").is_none());
+        let ok = openai_to_claude(&user_req(json!({"reasoning_effort": "high"})), "claude-x");
+        assert_eq!(ok["thinking"]["budget_tokens"], 2_976);
+        let tools = json!([{"type": "function", "function": {"name": "f", "parameters": {"type": "object"}}}]);
+        let forced = openai_to_claude(
+            &user_req(json!({"reasoning_effort": "high", "tools": tools, "tool_choice": "required", "temperature": 0.5})),
+            "claude-x",
+        );
+        assert!(forced.get("thinking").is_none());
+        assert_eq!(forced["temperature"], 0.5);
     }
 }

@@ -1,8 +1,8 @@
 {
  "meta": {
   "upstreamVersion": "0.5.116",
-  "upstreamCommit": "1339107e624d1ab150c6a0c2c2ee22caa7e9db2f",
-  "generatedAt": "2026-11-09"
+  "upstreamCommit": "1855aa44473e88feac9d3f131b9c0c5fc9706b68",
+  "generatedAt": "2026-11-16"
  },
  "skipped": [
   {

@@ -1,8 +1,8 @@
 {
  "meta": {
   "upstreamVersion": "0.5.116",
-  "upstreamCommit": "1339107e624d1ab150c6a0c2c2ee22caa7e9db2f",
-  "generatedAt": "2026-11-09"
+  "upstreamCommit": "1855aa44473e88feac9d3f131b9c0c5fc9706b68",
+  "generatedAt": "2026-11-16"
  },
  "providers": [
   {
@@ -1123,7 +1123,7 @@
      "Anthropic-Version": "2023-06-01",
      "Anthropic-Beta": "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,advanced-tool-use-2025-11-20,effort-2025-11-24,structured-outputs-2025-12-15,fast-mode-2026-02-01,redact-thinking-2026-02-12,token-efficient-tools-2026-03-28",
      "Anthropic-Dangerous-Direct-Browser-Access": "true",
-     "User-Agent": "claude-cli/2.1.280 (external, sdk-cli)",
+     "User-Agent": "claude-cli/2.1.322 (external, sdk-cli)",
      "X-App": "cli",
      "X-Stainless-Helper-Method": "stream",
      "X-Stainless-Retry-Count": "0",
@@ -1176,16 +1176,16 @@
    },
    "models": [
     {
+     "id": "claude-fable-5-2",
+     "name": "Claude Fable 5.2"
+    },
+    {
      "id": "claude-opus-5-5",
      "name": "Claude Opus 5.5"
     },
     {
      "id": "claude-opus-5",
      "name": "Claude Opus 5"
-    },
-    {
-     "id": "claude-fable-5-1",
-     "name": "Claude Fable 5.1"
     },
     {
      "id": "claude-fable-5",
@@ -1198,6 +1198,10 @@
     {
      "id": "claude-sonnet-5",
      "name": "Claude Sonnet 5"
+    },
+    {
+     "id": "claude-haiku-5-5",
+     "name": "Claude Haiku 5.5"
     },
     {
      "id": "claude-haiku-4-5-20251001",
@@ -1326,6 +1330,9 @@
     },
     "quirks": {
      "clineEnvelope": true
+    },
+    "usage": {
+     "url": "https://api.cline.bot/api/v1/users/me/plan/usage-limits"
     },
     "auth": {
      "combined": true,
@@ -1509,11 +1516,11 @@
     "baseUrl": "https://chatgpt.com/backend-api/codex/responses",
     "format": "openai-responses",
     "forceStream": true,
-    "cliVersion": "0.159.0",
+    "cliVersion": "0.167.1",
     "headers": {
      "originator": "codex_cli_rs",
-     "User-Agent": "codex_cli_rs/0.159.0",
-     "version": "0.159.0"
+     "User-Agent": "codex_cli_rs/0.167.1",
+     "version": "0.167.1"
     },
     "usage": {
      "url": "https://chatgpt.com/backend-api/wham/usage",
@@ -2241,10 +2248,6 @@
     {
      "id": "claude-fable-5",
      "name": "Claude Fable 5"
-    },
-    {
-     "id": "claude-fable-5.1",
-     "name": "Claude Fable 5.1"
     },
     {
      "id": "claude-haiku-4.5",
@@ -3784,11 +3787,47 @@
    "transport": {
     "baseUrl": "https://integrate.api.nvidia.com/v1/chat/completions",
     "validateUrl": "https://integrate.api.nvidia.com/v1/models",
+    "timeoutMs": 90000,
+    "quirks": {
+     "dropClientMetadata": true
+    },
     "format": "openai"
    },
    "transports": null,
    "oauth": null,
    "models": [
+    {
+     "id": "nvidia/nemotron-3.5-lightning-30b-a3b",
+     "name": "Nemotron 3.5 Lightning"
+    },
+    {
+     "id": "nvidia/nemotron-3.5-bolt-e4b",
+     "name": "Nemotron 3.5 Bolt"
+    },
+    {
+     "id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+     "name": "Nemotron 3 Nano Omni"
+    },
+    {
+     "id": "nvidia/nemotron-3-ultra-550b-a55b",
+     "name": "Nemotron 3 Ultra"
+    },
+    {
+     "id": "poolside/laguna-xs-2.1",
+     "name": "Laguna XS 2.1"
+    },
+    {
+     "id": "meta/llama-guard-4-12b",
+     "name": "Llama Guard 4 12B"
+    },
+    {
+     "id": "nvidia/riva-translate-4b-instruct-v2",
+     "name": "Riva Translate 4B v2"
+    },
+    {
+     "id": "meta/llama-3.3-70b-instruct",
+     "name": "Llama 3.3 70B Instruct"
+    },
     {
      "id": "minimaxai/minimax-m2.7",
      "name": "MiniMax M2.7"
@@ -3812,10 +3851,6 @@
     {
      "id": "moonshotai/kimi-k2.6",
      "name": "Kimi K2.6"
-    },
-    {
-     "id": "nvidia/nemotron-3-ultra-550b-a55b",
-     "name": "Nemotron 3 Ultra"
     }
    ],
    "passthroughModels": false,
@@ -4250,6 +4285,9 @@
    "transport": {
     "baseUrl": "https://token.sensenova.cn/v1/chat/completions",
     "validateUrl": "https://token.sensenova.cn/v1/models",
+    "quirks": {
+     "reasoningAliasFields": true
+    },
     "format": "openai"
    },
    "transports": null,
@@ -4282,6 +4320,62 @@
     {
      "id": "kimi-k3",
      "name": "Kimi K3"
+    }
+   ],
+   "passthroughModels": false,
+   "thinkingConfig": {
+    "options": [
+     "none",
+     "low",
+     "medium",
+     "high",
+     "max"
+    ],
+    "defaultMode": "high"
+   }
+  },
+  {
+   "id": "sensenova-intl",
+   "alias": "sensenova-intl",
+   "aliases": [],
+   "category": "apikey",
+   "authType": "apikey",
+   "authModes": null,
+   "noAuth": false,
+   "priority": 999,
+   "display": {
+    "name": "SenseNova (Intl)",
+    "color": "#5B5CE2",
+    "textIcon": "SN",
+    "icon": "auto_awesome",
+    "website": "https://platform.sensenova.ai",
+    "apiKeyUrl": "https://platform.sensenova.ai",
+    "authHint": null,
+    "deprecated": false,
+    "deprecationNotice": null
+   },
+   "transport": {
+    "baseUrl": "https://token.sensenova.ai/v1/chat/completions",
+    "validateUrl": "https://token.sensenova.ai/v1/models",
+    "quirks": {
+     "reasoningAliasFields": true
+    },
+    "format": "openai"
+   },
+   "transports": null,
+   "oauth": null,
+   "models": [
+    {
+     "id": "sensenova-6.8-flash",
+     "name": "SenseNova 6.8 Flash"
+    },
+    {
+     "id": "sensenova-6.8-flash-lite",
+     "name": "SenseNova 6.8 Flash Lite"
+    },
+    {
+     "id": "sensenova-6.7-flash-lite",
+     "name": "SenseNova 6.7 Flash Lite"
     }
    ],
    "passthroughModels": false,
@@ -4391,6 +4485,82 @@
     }
    ],
    "passthroughModels": false,
+   "thinkingConfig": null
+  },
+  {
+   "id": "synthetic",
+   "alias": "synthetic",
+   "aliases": [
+    "syn",
+    "synthetic-new"
+   ],
+   "category": "apikey",
+   "authType": "apikey",
+   "authModes": [
+    "apikey"
+   ],
+   "noAuth": false,
+   "priority": 999,
+   "display": {
+    "name": "Synthetic",
+    "color": "#111827",
+    "textIcon": "SY",
+    "icon": "hub",
+    "website": "https://synthetic.new",
+    "apiKeyUrl": "https://synthetic.new/user-settings/api",
+    "authHint": null,
+    "deprecated": false,
+    "deprecationNotice": null
+   },
+   "transport": {
+    "baseUrl": "https://api.synthetic.new/openai/v1/chat/completions",
+    "validateUrl": "https://api.synthetic.new/v2/quotas",
+    "usage": {
+     "url": "https://api.synthetic.new/v2/quotas"
+    },
+    "format": "openai"
+   },
+   "transports": null,
+   "oauth": null,
+   "models": [
+    {
+     "id": "hf:zai-org/GLM-5.3",
+     "name": "GLM 5.3"
+    },
+    {
+     "id": "hf:zai-org/GLM-5.3-Flash",
+     "name": "GLM 5.3 Flash"
+    },
+    {
+     "id": "hf:zai-org/GLM-4.7-Flash",
+     "name": "GLM 4.7 Flash"
+    },
+    {
+     "id": "hf:moonshotai/Kimi-K3",
+     "name": "Kimi K3"
+    },
+    {
+     "id": "hf:deepseek-ai/DeepSeek-V4.1-Flash",
+     "name": "DeepSeek V4.1 Flash"
+    },
+    {
+     "id": "hf:deepseek-ai/DeepSeek-V4.1-Flash-1017",
+     "name": "DeepSeek V4.1 Flash 1017"
+    },
+    {
+     "id": "hf:Qwen/Qwen3.8-27B",
+     "name": "Qwen3.8 27B"
+    },
+    {
+     "id": "hf:openai/gpt-oss-120b",
+     "name": "GPT-OSS 120B"
+    },
+    {
+     "id": "hf:nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4",
+     "name": "Nemotron 3 Super 120B"
+    }
+   ],
+   "passthroughModels": true,
    "thinkingConfig": null
   },
   {

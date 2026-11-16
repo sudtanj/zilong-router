@@ -1,8 +1,8 @@
 {
  "meta": {
   "upstreamVersion": "0.5.116",
-  "upstreamCommit": "1339107e624d1ab150c6a0c2c2ee22caa7e9db2f",
-  "generatedAt": "2026-11-09"
+  "upstreamCommit": "1855aa44473e88feac9d3f131b9c0c5fc9706b68",
+  "generatedAt": "2026-11-16"
  },
  "freeNamespaces": [
   "cline-free/"
@@ -185,12 +185,36 @@
    "cache_creation": 5
   },
   {
+   "model": "claude-fable-5-2",
+   "input": 8,
+   "output": 40,
+   "cached": 0.2,
+   "reasoning": 40,
+   "cache_creation": 10
+  },
+  {
+   "model": "claude-fable-5-1",
+   "input": 10,
+   "output": 50,
+   "cached": 1,
+   "reasoning": 50,
+   "cache_creation": 12.5
+  },
+  {
    "model": "claude-fable-5",
    "input": 10,
    "output": 50,
    "cached": 1,
    "reasoning": 50,
    "cache_creation": 12.5
+  },
+  {
+   "model": "claude-haiku-5-5",
+   "input": 0.1,
+   "output": 0.5,
+   "cached": 0.01,
+   "reasoning": 0.5,
+   "cache_creation": 0.125
   },
   {
    "model": "claude-sonnet-5-5",
@@ -1971,6 +1995,14 @@
    "cached": 0.25,
    "reasoning": 18,
    "cache_creation": 2
+  },
+  {
+   "pattern": "gemini-4-*",
+   "input": 2,
+   "output": 10,
+   "cached": 0.1,
+   "reasoning": 10,
+   "cache_creation": 0.1875
   },
   {
    "pattern": "gemini-3-*",
